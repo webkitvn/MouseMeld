@@ -112,7 +112,7 @@ Prefer the fast path:
 
 Planning readiness is decision readiness for the bounded release: settle necessary product, domain, architecture, ABI, persistence, and safety choices before execution. Targeted checks, live checks, and dogfood supply runtime evidence during execution; this does not bypass the execution-instantiation hierarchy or the sole current-context requirement.
 
-Independent technical review covers the exact change and relevant checks. Computer-use review can establish observable UI and interactions where needed; physical input and perceived smoothness require relevant user evidence. Diagnose dogfood failures with existing bounded diagnostics and tools first. Scoped non-critical limitations may be disclosed and iterated, but do not knowingly ship wrong-target outcomes, unintended input suppression or stuck input, data or configuration corruption, or without a safe disable/recovery path.
+Independent technical review covers the exact change and relevant checks. Changes made while iterating must go through relevant verification and independent review before ship. Computer-use review can establish observable UI and interactions where needed; physical input and perceived smoothness require relevant user evidence. Diagnose dogfood failures with existing bounded diagnostics and tools first. Scoped non-critical limitations may be disclosed and iterated, but do not knowingly ship wrong-target outcomes, unintended input suppression or stuck input, data or configuration corruption, or without a safe disable/recovery path.
 
 Stop when the Issue acceptance criteria are met. Do not add compatibility work, abstractions, diagnostics, benchmarks, documentation, or tests that the Issue does not require.
 
