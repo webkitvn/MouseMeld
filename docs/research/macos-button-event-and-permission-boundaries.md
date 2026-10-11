@@ -202,20 +202,20 @@ No current trace or System Settings receipt inspected here proves granted permis
 
 ## Bounded prototype questions
 
-No prototype was run for this research. A narrow, explicitly authorized macOS 14+ prototype is required before an implementation can claim any of the following:
+No prototype was run for this research. The following require bounded macOS 14+ target evidence before an implementation can claim them; obtain it through an integrated implementation/live check, or use a narrow, explicitly authorized disposable prototype only for a material feasibility blocker:
 
 1. For the declared signing/distribution context, which permission state(s) are sufficient for a passive button-only tap, and independently for an active button-only tap that preserves or returns `NULL`; record behavior after grant/revocation. Test the WWDC `listenOnly`/Input Monitoring versus `defaultTap`/Accessibility split as a hypothesis, not as a replacement for this question or proof that the states are exclusive.
 2. Which observed vendor/device button presses are delivered as `otherMouseDown`/`otherMouseUp`/`otherMouseDragged`, and what `mouseEventButtonNumber` values arrive? Record that as observed device behavior, not a universal mapping or `Device Identity` rule.
 3. Under preserve versus suppress of down/up/drag, what delivery sequence reaches a target application, including unmatched members and tap-disable/re-enable boundaries?
 
-These are feasibility observations, not permission policy or product-action choices. If a planner needs a universal permission/readiness or sequence-integrity guarantee before this bounded prototype, that is **NEEDS_LEAD_DECISION**, not a reason to expand research or infer a new HID/process architecture.
+These are feasibility observations, not permission policy or product-action choices. If a planner needs a universal permission/readiness or sequence-integrity guarantee before bounded target evidence, that is **NEEDS_LEAD_DECISION**, not a reason to expand research or infer a new HID/process architecture.
 
 ## Decision inputs unlocked
 
 1. A future planner may treat `otherMouseDown`/`otherMouseUp`/`otherMouseDragged` plus `mouseEventButtonNumber` as documented event-level data, while retaining Unknown `Device Identity`.
 2. A future Action decision may choose preserve/modify/delete only after it defines its own press/release/drag semantics; Apple’s callback contract supports those primitives but does not choose the policy.
 3. Any plan involving synthetic reposting must own loop behavior explicitly; direct callback return is the documented alternative for pass-through, mutation, and suppression.
-4. A future planner must treat the conflicting keyboard authorization documentation as unresolved rather than infer an override, exclusive permission modes, or simultaneous requirements. Mouse-only permission UI/readiness and runtime behavior remain conditional until the bounded prototype resolves the stated macOS 14+ facts; this artifact makes no UI or runtime decision.
+4. A future planner must treat the conflicting keyboard authorization documentation as unresolved rather than infer an override, exclusive permission modes, or simultaneous requirements. Mouse-only permission UI/readiness and runtime behavior remain conditional until bounded target evidence resolves the stated macOS 14+ facts; this artifact makes no UI or runtime decision.
 
 ## Primary-source index
 
