@@ -40,11 +40,7 @@ Computer-use tools may inspect and control macOS apps and browsers when needed f
 
 Use Oracle only for material second-model review, architecture/design uncertainty, or an explicit review requirement. Treat its output as advisory and verify material conclusions against repository evidence and tests.
 
-Before any consultation, read and follow [the Oracle workflow](docs/workflows/oracle.md) for Chrome preparation, fresh/continued conversation selection, the attach command, completion, recovery, and cleanup.
-
-- Use `--engine browser` explicitly and the dedicated ChatGPT Project. API mode requires explicit user consent.
-- Prepare Chrome outside Oracle; attach only to a verified endpoint and tab. Verify any required model/effort in the UI before sending; missing verification blocks submission.
-- Respect browser/session ownership and preserve source authentication. Continue the exact supplied conversation; preserve recovery state on ambiguous submission and never blindly resend or bypass duplicate protection.
+Before any consultation, read and follow the installed `oracle` skill.
 
 ## Start work
 
