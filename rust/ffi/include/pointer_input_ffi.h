@@ -91,7 +91,9 @@ pointer_input_status_v3 pointer_input_engine_set_configuration_v3(
     void *handle, const pointer_input_configuration_v3 *configuration);
 
 /* A non-null output is initialized to valid Preserve/closed before request validation.
- * `cycle` and `out_decision` may designate the same caller-owned POD storage. */
+ * A non-success status makes that fallback noncommittable: it is neither release/recovery
+ * evidence nor a next cycle. The caller must gate commitment on status and inhibit admission
+ * until a valid release or lifecycle recovery. `cycle` and `out_decision` may alias. */
 pointer_input_status_v3 pointer_input_engine_evaluate_v3(
     void *handle, const pointer_input_event_v3 *event,
     const pointer_input_decision_v3 *cycle, pointer_input_decision_v3 *out_decision);

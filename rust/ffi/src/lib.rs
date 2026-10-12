@@ -156,6 +156,15 @@ fn install_panic_hook() -> Result<(), PointerInputStatusV3> {
         if PANIC_HOOK_INSTALL_FAILURE.swap(false, std::sync::atomic::Ordering::Relaxed) {
             panic!("test-only hook installation failure");
         }
+        #[cfg(test)]
+        if let Some((ready, release)) = INSTALLATION_GATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            let _ = ready.send(());
+            let _ = release.recv();
+        }
         let previous_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if !EVALUATING.try_with(Cell::get).unwrap_or(false) {
@@ -527,6 +536,10 @@ static PANIC_ON_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 #[cfg(test)]
 static PANIC_HOOK_INSTALL_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static INSTALLATION_GATE: Mutex<
+    Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
+> = Mutex::new(None);
 
 #[cfg(test)]
 struct PanicOnDrop;
@@ -585,7 +598,9 @@ mod tests {
         sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
+            mpsc,
         },
+        time::Duration,
     };
 
     fn event() -> PointerInputEventV3 {
@@ -607,19 +622,53 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_panics_preserve_output_and_do_not_delegate_to_the_previous_hook() {
+    fn panic_policy_contains_evaluation_panics_and_recovers_from_startup_failures() {
         // ponytail: this sole hook-touching unit test retains the wrapper until process exit.
         let _previous_hook = std::panic::take_hook();
         let delegated = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&delegated);
+        let (reentrant_sender, reentrant_receiver) = mpsc::channel();
         std::panic::set_hook(Box::new(move |_| {
             counter.fetch_add(1, Ordering::Relaxed);
+            let mut owner = ptr::null_mut();
+            let status = unsafe { pointer_input_engine_create_v3(&mut owner) };
+            let _ = reentrant_sender.send((status, owner.is_null()));
         }));
-        let mut owner = ptr::null_mut();
+
+        let mut failed_owner = ptr::null_mut();
+        PANIC_HOOK_INSTALL_FAILURE.store(true, Ordering::Relaxed);
         assert_eq!(
-            unsafe { pointer_input_engine_create_v3(&mut owner) },
-            PointerInputStatusV3::Success
+            unsafe { pointer_input_engine_create_v3(&mut failed_owner) },
+            PointerInputStatusV3::Panic
         );
+        assert!(failed_owner.is_null());
+        assert_eq!(
+            reentrant_receiver.recv_timeout(Duration::from_secs(1)),
+            Ok((PointerInputStatusV3::Busy, true))
+        );
+
+        let (ready_sender, ready_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        *INSTALLATION_GATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some((ready_sender, release_receiver));
+        let installer = std::thread::spawn(|| {
+            let mut owner = ptr::null_mut();
+            let status = unsafe { pointer_input_engine_create_v3(&mut owner) };
+            (status, owner as usize)
+        });
+        assert!(ready_receiver.recv_timeout(Duration::from_secs(1)).is_ok());
+        let mut busy_owner = ptr::null_mut();
+        assert_eq!(
+            unsafe { pointer_input_engine_create_v3(&mut busy_owner) },
+            PointerInputStatusV3::Busy
+        );
+        assert!(busy_owner.is_null());
+        assert!(release_sender.send(()).is_ok());
+        let (status, owner) = installer.join().expect("installer must not panic");
+        assert_eq!(status, PointerInputStatusV3::Success);
+        let mut owner = owner as *mut c_void;
         let input = event();
         let cycle = preserve_output();
         let mut output = preserve_output();

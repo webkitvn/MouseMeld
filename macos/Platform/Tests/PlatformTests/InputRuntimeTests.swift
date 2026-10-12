@@ -371,6 +371,34 @@ final class InputRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.configurationAttention, .none)
     }
 
+    func testBindingSurvivesRuntimeTransactionsRejectedWriteAndRetry() throws {
+        let store = ConfigurationStore(directory: directory)
+        let binding = try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))
+        let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137, binding: binding)
+        XCTAssertTrue(store.persist(committed))
+        let runtime = InputRuntime(store: store)
+
+        runtime.setEnabled(true)
+        runtime.setDirection(.preserve)
+        runtime.setAmountPercent(25)
+        let updated = PersistedConfiguration(enabled: true, direction: .preserve, amountPercent: 25, binding: binding)
+        XCTAssertEqual(runtime.configuration, updated)
+        let bytes = try Data(contentsOf: store.url)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        runtime.setAmountPercent(137)
+        XCTAssertEqual(runtime.configuration, updated)
+        XCTAssertEqual(runtime.configurationAttention, .saveFailed)
+        XCTAssertEqual(try Data(contentsOf: store.url), bytes)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        runtime.setAmountPercent(137)
+        let retried = PersistedConfiguration(enabled: true, direction: .preserve, amountPercent: 137, binding: binding)
+        XCTAssertEqual(runtime.configuration, retried)
+        XCTAssertEqual(store.load().0, retried)
+    }
+
     func testFailedAmountWriteKeepsFileAndSnapshotAndAllowsRetry() throws {
         let store = ConfigurationStore(directory: directory)
         let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137)

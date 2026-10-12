@@ -67,6 +67,20 @@ fn closed_cycle() -> PointerInputDecisionV3 {
         cycle_deadline_monotonic_ns: 0,
     }
 }
+fn assert_closed_fallback(output: PointerInputDecisionV3) {
+    assert_eq!(output.version, POINTER_INPUT_ABI_VERSION_V3);
+    assert_eq!(output.size, size_of::<PointerInputDecisionV3>() as u32);
+    assert_eq!(output.decision, POINTER_INPUT_DECISION_PRESERVE_V3);
+    assert_eq!(output.request_back, 0);
+    assert_eq!(output.cycle_tag, POINTER_INPUT_CYCLE_CLOSED_V3);
+    assert_eq!(output.reserved, [0; 3]);
+    assert_eq!(output.horizontal_hundredths, 0);
+    assert_eq!(output.vertical_hundredths, 0);
+    assert_eq!(output.cycle_button_number, 0);
+    assert_eq!(output.cycle_reserved, 0);
+    assert_eq!(output.cycle_event_number, 0);
+    assert_eq!(output.cycle_deadline_monotonic_ns, 0);
+}
 fn configuration(
     binding_present: u32,
     binding_enabled: u32,
@@ -479,6 +493,159 @@ fn disabled_modifier_orphan_and_null_inputs_preserve_without_request() {
         (output.decision, output.request_back),
         (POINTER_INPUT_DECISION_PRESERVE_V3, 0)
     );
+    assert_eq!(
+        unsafe { pointer_input_engine_destroy_v3(&mut owner) },
+        PointerInputStatusV3::Success
+    );
+}
+
+#[test]
+fn rejects_null_abi_arguments_and_preserves_non_null_output() {
+    let mut owner = core::ptr::null_mut();
+    let event = scroll(0, 3);
+    let cycle = closed_cycle();
+    let poisoned_output = PointerInputDecisionV3 {
+        decision: u32::MAX,
+        request_back: 1,
+        ..closed_cycle()
+    };
+    let mut output = poisoned_output;
+    let configuration = configuration(0, 0, 0);
+
+    assert_eq!(
+        unsafe { pointer_input_engine_create_v3(core::ptr::null_mut()) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(create(&mut owner), PointerInputStatusV3::Success);
+    assert_eq!(
+        unsafe { pointer_input_configuration_validate_v3(core::ptr::null()) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { pointer_input_engine_set_configuration_v3(owner, core::ptr::null()) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { pointer_input_engine_set_configuration_v3(core::ptr::null_mut(), &configuration) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { pointer_input_engine_evaluate_v3(owner, &event, core::ptr::null(), &mut output) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_closed_fallback(output);
+    output = poisoned_output;
+    assert_eq!(
+        unsafe { pointer_input_engine_evaluate_v3(owner, core::ptr::null(), &cycle, &mut output) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_closed_fallback(output);
+    output = poisoned_output;
+    assert_eq!(
+        unsafe {
+            pointer_input_engine_evaluate_v3(core::ptr::null_mut(), &event, &cycle, &mut output)
+        },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_closed_fallback(output);
+    assert_eq!(
+        unsafe { pointer_input_engine_evaluate_v3(owner, &event, &cycle, core::ptr::null_mut()) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { pointer_input_engine_destroy_v3(core::ptr::null_mut()) },
+        PointerInputStatusV3::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { pointer_input_engine_destroy_v3(&mut owner) },
+        PointerInputStatusV3::Success
+    );
+}
+
+#[test]
+fn create_rejects_owned_handle_without_overwriting_it() {
+    let mut owner = core::ptr::null_mut();
+    assert_eq!(create(&mut owner), PointerInputStatusV3::Success);
+    let original = owner;
+    assert_eq!(create(&mut owner), PointerInputStatusV3::InvalidArgument);
+    assert_eq!(owner, original);
+    assert_eq!(
+        unsafe { pointer_input_engine_destroy_v3(&mut owner) },
+        PointerInputStatusV3::Success
+    );
+}
+
+#[test]
+fn overflow_fails_open_for_separate_and_aliased_cycle_storage() {
+    let mut owner = core::ptr::null_mut();
+    let mut configuration = configuration(0, 0, 0);
+    configuration.amount_percent = 400;
+    let overflow = scroll(i64::MIN, 1);
+    let trusted_open = PointerInputDecisionV3 {
+        cycle_tag: POINTER_INPUT_CYCLE_OPEN_V3,
+        cycle_button_number: 3,
+        cycle_event_number: 7,
+        cycle_deadline_monotonic_ns: 5_000_000_000,
+        ..closed_cycle()
+    };
+    let trusted_quarantined = PointerInputDecisionV3 {
+        cycle_tag: POINTER_INPUT_CYCLE_QUARANTINED_V3,
+        cycle_button_number: 3,
+        cycle_event_number: 7,
+        ..closed_cycle()
+    };
+    assert_eq!(create(&mut owner), PointerInputStatusV3::Success);
+    assert_eq!(
+        unsafe { pointer_input_engine_set_configuration_v3(owner, &configuration) },
+        PointerInputStatusV3::Success
+    );
+    for cycle in [trusted_open, trusted_quarantined] {
+        let mut output = cycle;
+        assert_eq!(
+            evaluate(owner, &overflow, &cycle, &mut output),
+            PointerInputStatusV3::EvaluationFailed
+        );
+        assert_closed_fallback(output);
+
+        let mut aliased = cycle;
+        assert_eq!(
+            unsafe { pointer_input_engine_evaluate_v3(owner, &overflow, &aliased, &mut aliased) },
+            PointerInputStatusV3::EvaluationFailed
+        );
+        assert_closed_fallback(aliased);
+    }
+    assert_eq!(
+        unsafe { pointer_input_engine_destroy_v3(&mut owner) },
+        PointerInputStatusV3::Success
+    );
+}
+
+#[test]
+fn exact_amounts_cross_the_abi_boundary() {
+    let mut owner = core::ptr::null_mut();
+    let cycle = closed_cycle();
+    assert_eq!(create(&mut owner), PointerInputStatusV3::Success);
+    for (amount_percent, expected) in [(25, 25), (137, 137)] {
+        let mut config = configuration(0, 0, 0);
+        config.amount_percent = amount_percent;
+        let mut output = closed_cycle();
+        assert_eq!(
+            unsafe { pointer_input_engine_set_configuration_v3(owner, &config) },
+            PointerInputStatusV3::Success
+        );
+        assert_eq!(
+            evaluate(owner, &scroll(1, -1), &cycle, &mut output),
+            PointerInputStatusV3::Success
+        );
+        assert_eq!(
+            (
+                output.decision,
+                output.horizontal_hundredths,
+                output.vertical_hundredths
+            ),
+            (POINTER_INPUT_DECISION_REPLACE_V3, -expected, expected)
+        );
+    }
     assert_eq!(
         unsafe { pointer_input_engine_destroy_v3(&mut owner) },
         PointerInputStatusV3::Success
