@@ -118,7 +118,7 @@ Stop when the Issue acceptance criteria are met. Do not add compatibility work, 
 
 Use reference implementations to reduce rediscovery. Reuse ideas and observable behavior, not code expression. Do not copy or mechanically transform external code, comments, documentation, tests, distinctive naming, module structure, or control flow. A routine reference comparison does not require a standalone artifact or tracker comment when it finds no material difference or blocker; record only findings that change implementation, acceptance, or later-agent context.
 
-Before proposing behavior or design, inspect applicable reference precedent. If it is unavailable, report that before proceeding; if inspection is unnecessary, state why. Delegations include relevant observations or the reason for skipping or being unable to inspect; references inform decisions, not replace independent rationale.
+Before proposing behavior or design, inspect applicable reference precedent. When applicable, locate the optional local `Repo X` input at `/Users/cuongpham/Projects/repo-x` and search or inspect relevant portions when available. If it is unavailable, report that before proceeding without cloning or hunting; if inspection is unnecessary, state why. Delegations include relevant observations in independent language or the reason for skipping or being unable to inspect; references inform decisions, not replace independent rationale.
 
 Do not block implementation to prove speculative details.
 
