@@ -1,6 +1,7 @@
 use pointer_input_engine::{
-    EvaluationStatus, InputDecision, InputEvent, InputSource, LineBasedReplacement,
-    ScrollConfiguration, ScrollEvent, ScrollGranularity, SourceClass,
+    Binding, ButtonEvent, ButtonPhase, Configuration, Cycle, EvaluationStatus, InputDecision,
+    InputEvent, InputSource, LineBasedReplacement, ScrollConfiguration, ScrollEvent,
+    ScrollGranularity, SourceClass,
 };
 
 fn line_event(horizontal_lines: i64, vertical_lines: i64, source_class: SourceClass) -> InputEvent {
@@ -261,6 +262,92 @@ fn multiplication_and_negation_overflow_preserve_the_whole_event() {
         assert_eq!(result.status, EvaluationStatus::EvaluationFailed);
         assert_eq!(result.decision, InputDecision::Preserve);
     }
+}
+
+#[test]
+fn binding_rejects_out_of_range_button_without_aliasing() {
+    assert!(Binding::new(2, true).is_none());
+    assert!(Binding::new(32, true).is_none());
+    assert!(Binding::new(35, true).is_none());
+
+    let engine = pointer_input_engine::Engine::new(Configuration {
+        scroll: ScrollConfiguration::system(),
+        binding: Binding::new(3, true),
+    });
+    let result = engine.evaluate(InputEvent::Button(ButtonEvent {
+        button_number: 3,
+        phase: ButtonPhase::Down,
+        modifiers_held: false,
+        event_number: 7,
+        monotonic_time_ns: 100,
+    }));
+    assert_eq!(result.decision, InputDecision::Suppress);
+    assert!(result.request_back);
+}
+
+#[test]
+fn matching_release_at_deadline_closes_without_rearming_expired_duplicate() {
+    let engine = pointer_input_engine::Engine::new(Configuration {
+        scroll: ScrollConfiguration::system(),
+        binding: Binding::new(3, true),
+    });
+    let down = InputEvent::Button(ButtonEvent {
+        button_number: 3,
+        phase: ButtonPhase::Down,
+        modifiers_held: false,
+        event_number: 7,
+        monotonic_time_ns: 100,
+    });
+    let opened = engine.evaluate(down);
+    let Cycle::Open {
+        deadline_monotonic_ns,
+        ..
+    } = opened.next_cycle
+    else {
+        panic!("down must open a cycle")
+    };
+
+    let expired_duplicate = engine.evaluate_with_cycle(
+        InputEvent::Button(ButtonEvent {
+            monotonic_time_ns: deadline_monotonic_ns,
+            ..match down {
+                InputEvent::Button(button) => button,
+                _ => unreachable!(),
+            }
+        }),
+        opened.next_cycle,
+    );
+    assert_eq!(expired_duplicate.decision, InputDecision::Preserve);
+    assert!(!expired_duplicate.request_back);
+    assert!(matches!(
+        expired_duplicate.next_cycle,
+        Cycle::Quarantined { .. }
+    ));
+
+    let released = engine.evaluate_with_cycle(
+        InputEvent::Button(ButtonEvent {
+            button_number: 3,
+            phase: ButtonPhase::Up,
+            modifiers_held: false,
+            event_number: 7,
+            monotonic_time_ns: deadline_monotonic_ns,
+        }),
+        opened.next_cycle,
+    );
+    assert_eq!(released.decision, InputDecision::Preserve);
+    assert_eq!(released.next_cycle, Cycle::Closed);
+    let next = engine.evaluate_with_cycle(
+        InputEvent::Button(ButtonEvent {
+            button_number: 3,
+            phase: ButtonPhase::Down,
+            modifiers_held: false,
+            event_number: 8,
+            monotonic_time_ns: deadline_monotonic_ns + 1,
+        }),
+        released.next_cycle,
+    );
+    assert_eq!(next.decision, InputDecision::Suppress);
+    assert!(next.request_back);
 }
 
 #[test]

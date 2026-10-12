@@ -36,9 +36,9 @@ class RuntimeTraceBundleTests(unittest.TestCase):
                     home = root / mode
                     config = home / "Library/Application Support/MouseMeld/configuration.json"
                     config.parent.mkdir(parents=True)
-                    original = b'{"schema_version":2,"scroll":{"enabled":false,"line_direction":"preserve","line_amount_percent":157}}\n'
+                    original = b'{"schema_version":3,"scroll":{"enabled":false,"line_direction":"preserve","line_amount_percent":157}}\n'
                     if mode == "active-external":
-                        original = b'{"schema_version":2,"scroll":{"enabled":true,"line_direction":"reverse","line_amount_percent":137}}\n'
+                        original = b'{"schema_version":3,"scroll":{"enabled":true,"line_direction":"reverse","line_amount_percent":137}}\n'
                     config.write_bytes(original)
                     traces = home / "traces"
                     env = {**build_env, "HOME": str(home), "CFFIXED_USER_HOME": str(home), "MMF_TRACE": "1", "MMF_TRACE_DIR": str(traces)}

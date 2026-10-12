@@ -22,104 +22,94 @@ thread_local! {
 const HOOK_UNINSTALLED: u8 = 0;
 const HOOK_INSTALLING: u8 = 1;
 const HOOK_INSTALLED: u8 = 2;
-
 static PANIC_HOOK_STATE: Mutex<u8> = Mutex::new(HOOK_UNINSTALLED);
-
 type PanicPayload = Box<dyn Any + Send + 'static>;
 
 /// The fixed-layout ABI version implemented by this library.
-pub const POINTER_INPUT_ABI_VERSION_V2: u32 = 2;
-/// Preserve the input event.
-pub const POINTER_INPUT_DECISION_PRESERVE_V2: u32 = 0;
-/// Replace the input event with the returned line deltas.
-pub const POINTER_INPUT_DECISION_REPLACE_V2: u32 = 1;
-/// Preserve the system direction.
-pub const POINTER_INPUT_DIRECTION_SYSTEM_V2: u32 = 0;
-/// Reverse eligible line-based input.
-pub const POINTER_INPUT_DIRECTION_REVERSE_V2: u32 = 1;
-/// Source class: mouse.
-pub const POINTER_INPUT_SOURCE_MOUSE_V2: u32 = 0;
-/// Source class: trackpad.
-pub const POINTER_INPUT_SOURCE_TRACKPAD_V2: u32 = 1;
-/// Source class: unavailable.
-pub const POINTER_INPUT_SOURCE_UNKNOWN_V2: u32 = 2;
-/// Discrete line-based input.
-pub const POINTER_INPUT_GRANULARITY_LINE_BASED_V2: u32 = 0;
-/// Continuous pixel-based input.
-pub const POINTER_INPUT_GRANULARITY_PIXEL_BASED_V2: u32 = 1;
+pub const POINTER_INPUT_ABI_VERSION_V3: u32 = 3;
+pub const POINTER_INPUT_DECISION_PRESERVE_V3: u32 = 0;
+pub const POINTER_INPUT_DECISION_REPLACE_V3: u32 = 1;
+pub const POINTER_INPUT_DECISION_SUPPRESS_V3: u32 = 2;
+pub const POINTER_INPUT_DIRECTION_SYSTEM_V3: u32 = 0;
+pub const POINTER_INPUT_DIRECTION_REVERSE_V3: u32 = 1;
+pub const POINTER_INPUT_SOURCE_MOUSE_V3: u32 = 0;
+pub const POINTER_INPUT_SOURCE_TRACKPAD_V3: u32 = 1;
+pub const POINTER_INPUT_SOURCE_UNKNOWN_V3: u32 = 2;
+pub const POINTER_INPUT_GRANULARITY_LINE_BASED_V3: u32 = 0;
+pub const POINTER_INPUT_GRANULARITY_PIXEL_BASED_V3: u32 = 1;
+pub const POINTER_INPUT_EVENT_SCROLL_V3: u32 = 0;
+pub const POINTER_INPUT_EVENT_BUTTON_V3: u32 = 1;
+pub const POINTER_INPUT_BUTTON_DOWN_V3: u32 = 0;
+pub const POINTER_INPUT_BUTTON_UP_V3: u32 = 1;
+pub const POINTER_INPUT_BUTTON_DRAG_V3: u32 = 2;
+pub const POINTER_INPUT_CYCLE_CLOSED_V3: u32 = 0;
+pub const POINTER_INPUT_CYCLE_OPEN_V3: u32 = 1;
+pub const POINTER_INPUT_CYCLE_QUARANTINED_V3: u32 = 2;
 
 /// Status returned by each ABI operation.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PointerInputStatusV2 {
-    /// The operation completed.
+pub enum PointerInputStatusV3 {
     Success = 0,
-    /// A required pointer, layout, or value was invalid.
     InvalidArgument = 1,
-    /// Evaluation could not safely produce a replacement.
     EvaluationFailed = 2,
-    /// A Rust panic was caught before it could cross the ABI boundary.
     Panic = 3,
-    /// Another creator is installing the process-wide panic hook; retry creation.
     Busy = 4,
 }
 
-/// C input event. `version` and `size` must exactly match this layout; `reserved` must be zero.
+/// C input event. Exact version, size, and zero reserved fields are required.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct PointerInputEventV2 {
-    /// ABI version.
+pub struct PointerInputEventV3 {
     pub version: u32,
-    /// Exact `sizeof(PointerInputEventV2)`.
     pub size: u32,
-    /// One of the `POINTER_INPUT_SOURCE_*_V2` constants.
+    pub event_kind: u32,
     pub source_class: u32,
-    /// One of the `POINTER_INPUT_GRANULARITY_*_V2` constants.
     pub granularity: u32,
-    /// Horizontal line delta.
+    pub button_phase: u32,
+    pub button_number: u32,
+    pub modifiers_held: u32,
     pub horizontal_lines: i64,
-    /// Vertical line delta.
     pub vertical_lines: i64,
-    /// Reserved for a future ABI version; must contain zeroes.
+    pub event_number: u64,
+    pub monotonic_time_ns: u64,
     pub reserved: [u32; 2],
 }
 
-/// C configuration. `version` and `size` must exactly match this layout; `reserved` must be zero.
+/// C configuration. Binding is canonical absent (`binding_present == 0`, other Binding fields 0)
+/// or present with a 3...31 button and boolean enabled tag.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct PointerInputConfigurationV2 {
-    /// ABI version.
+pub struct PointerInputConfigurationV3 {
     pub version: u32,
-    /// Exact `sizeof(PointerInputConfigurationV2)`.
     pub size: u32,
-    /// One of the `POINTER_INPUT_DIRECTION_*_V2` constants.
     pub direction: u32,
-    /// Exact integer percent, 25...400.
     pub amount_percent: u32,
-    /// Reserved for a future ABI version; must contain zero.
+    pub binding_present: u32,
+    pub binding_enabled: u32,
+    pub binding_button_number: u32,
     pub reserved: u32,
 }
 
-/// C evaluation output. The ABI initializes a non-null output to Preserve before validation.
+/// C evaluation output. A non-null output is initialized to valid Preserve/closed before input use.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct PointerInputDecisionV2 {
-    /// ABI version.
+pub struct PointerInputDecisionV3 {
     pub version: u32,
-    /// Exact `sizeof(PointerInputDecisionV2)`.
     pub size: u32,
-    /// One of the `POINTER_INPUT_DECISION_*_V2` constants.
     pub decision: u32,
-    /// Reserved for a future ABI version; always zero in output.
-    pub reserved: u32,
-    /// Replacement horizontal hundredths-of-a-line when `decision` is Replace.
+    pub request_back: u32,
+    pub cycle_tag: u32,
+    pub reserved: [u32; 3],
     pub horizontal_hundredths: i64,
-    /// Replacement vertical hundredths-of-a-line when `decision` is Replace.
     pub vertical_hundredths: i64,
+    pub cycle_button_number: u32,
+    pub cycle_reserved: u32,
+    pub cycle_event_number: u64,
+    pub cycle_deadline_monotonic_ns: u64,
 }
 
 struct EvaluationScope(bool);
-
 impl EvaluationScope {
     fn enter() -> Option<Self> {
         EVALUATING
@@ -131,7 +121,6 @@ impl EvaluationScope {
             .ok()
     }
 }
-
 impl Drop for EvaluationScope {
     fn drop(&mut self) {
         let _ = EVALUATING.try_with(|evaluating| evaluating.set(self.0));
@@ -143,13 +132,11 @@ fn discard_panic_payload(payload: PanicPayload) {
         mem::forget(secondary_payload);
     }
 }
-
-fn panic_status(payload: PanicPayload) -> PointerInputStatusV2 {
+fn panic_status(payload: PanicPayload) -> PointerInputStatusV3 {
     discard_panic_payload(payload);
-    PointerInputStatusV2::Panic
+    PointerInputStatusV3::Panic
 }
-
-fn install_panic_hook() -> Result<(), PointerInputStatusV2> {
+fn install_panic_hook() -> Result<(), PointerInputStatusV3> {
     {
         let mut state = PANIC_HOOK_STATE
             .lock()
@@ -157,29 +144,26 @@ fn install_panic_hook() -> Result<(), PointerInputStatusV2> {
         match *state {
             HOOK_INSTALLED => return Ok(()),
             HOOK_UNINSTALLED if std::thread::panicking() => {
-                return Err(PointerInputStatusV2::Panic);
+                return Err(PointerInputStatusV3::Panic);
             }
             HOOK_UNINSTALLED => *state = HOOK_INSTALLING,
-            HOOK_INSTALLING => return Err(PointerInputStatusV2::Busy),
-            _ => return Err(PointerInputStatusV2::Panic),
+            HOOK_INSTALLING => return Err(PointerInputStatusV3::Busy),
+            _ => return Err(PointerInputStatusV3::Panic),
         }
     }
-
     let result = catch_unwind(AssertUnwindSafe(|| {
         #[cfg(test)]
         if PANIC_HOOK_INSTALL_FAILURE.swap(false, std::sync::atomic::Ordering::Relaxed) {
             panic!("test-only hook installation failure");
         }
         #[cfg(test)]
+        if let Some((ready, release)) = INSTALLATION_GATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
         {
-            let gate = INSTALLATION_GATE
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take();
-            if let Some((ready, release)) = gate {
-                let _ = ready.send(());
-                let _ = release.recv();
-            }
+            let _ = ready.send(());
+            let _ = release.recv();
         }
         let previous_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
@@ -188,7 +172,6 @@ fn install_panic_hook() -> Result<(), PointerInputStatusV2> {
             }
         }));
     }));
-
     let mut state = PANIC_HOOK_STATE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -200,98 +183,240 @@ fn install_panic_hook() -> Result<(), PointerInputStatusV2> {
         Err(payload) => {
             *state = HOOK_UNINSTALLED;
             discard_panic_payload(payload);
-            Err(PointerInputStatusV2::Panic)
+            Err(PointerInputStatusV3::Panic)
         }
     }
 }
 
-fn preserve_output() -> PointerInputDecisionV2 {
-    PointerInputDecisionV2 {
-        version: POINTER_INPUT_ABI_VERSION_V2,
-        size: size_of::<PointerInputDecisionV2>() as u32,
-        decision: POINTER_INPUT_DECISION_PRESERVE_V2,
-        reserved: 0,
+fn preserve_output() -> PointerInputDecisionV3 {
+    PointerInputDecisionV3 {
+        version: POINTER_INPUT_ABI_VERSION_V3,
+        size: size_of::<PointerInputDecisionV3>() as u32,
+        decision: POINTER_INPUT_DECISION_PRESERVE_V3,
+        request_back: 0,
+        cycle_tag: POINTER_INPUT_CYCLE_CLOSED_V3,
+        reserved: [0; 3],
         horizontal_hundredths: 0,
         vertical_hundredths: 0,
+        cycle_button_number: 0,
+        cycle_reserved: 0,
+        cycle_event_number: 0,
+        cycle_deadline_monotonic_ns: 0,
     }
 }
-
 fn valid_layout(version: u32, size: u32, expected_size: usize) -> bool {
-    version == POINTER_INPUT_ABI_VERSION_V2 && size == expected_size as u32
+    version == POINTER_INPUT_ABI_VERSION_V3 && size == expected_size as u32
+}
+fn valid_bool(value: u32) -> bool {
+    value <= 1
 }
 
-fn configuration_from(value: PointerInputConfigurationV2) -> Option<engine::ScrollConfiguration> {
+fn configuration_from(value: PointerInputConfigurationV3) -> Option<engine::Configuration> {
     if !valid_layout(
         value.version,
         value.size,
-        size_of::<PointerInputConfigurationV2>(),
+        size_of::<PointerInputConfigurationV3>(),
     ) || value.reserved != 0
+        || !valid_bool(value.binding_present)
+        || !valid_bool(value.binding_enabled)
     {
         return None;
     }
-
-    let configuration = match value.direction {
-        POINTER_INPUT_DIRECTION_SYSTEM_V2 => engine::ScrollConfiguration::system(),
-        POINTER_INPUT_DIRECTION_REVERSE_V2 => engine::ScrollConfiguration::reverse(),
+    let scroll = match value.direction {
+        POINTER_INPUT_DIRECTION_SYSTEM_V3 => engine::ScrollConfiguration::system(),
+        POINTER_INPUT_DIRECTION_REVERSE_V3 => engine::ScrollConfiguration::reverse(),
         _ => return None,
+    }
+    .with_amount(value.amount_percent)?;
+    let binding = if value.binding_present == 0 {
+        if value.binding_enabled != 0 || value.binding_button_number != 0 {
+            return None;
+        }
+        None
+    } else {
+        Some(engine::Binding::new(
+            value.binding_button_number,
+            value.binding_enabled == 1,
+        )?)
     };
-    configuration.with_amount(value.amount_percent)
+    Some(engine::Configuration { scroll, binding })
 }
 
-fn event_from(value: PointerInputEventV2) -> Option<engine::InputEvent> {
-    if !valid_layout(value.version, value.size, size_of::<PointerInputEventV2>())
+fn event_from(value: PointerInputEventV3) -> Option<engine::InputEvent> {
+    if !valid_layout(value.version, value.size, size_of::<PointerInputEventV3>())
         || value.reserved != [0; 2]
+        || !valid_bool(value.modifiers_held)
     {
         return None;
     }
-
-    let source_class = match value.source_class {
-        POINTER_INPUT_SOURCE_MOUSE_V2 => engine::SourceClass::Mouse,
-        POINTER_INPUT_SOURCE_TRACKPAD_V2 => engine::SourceClass::Trackpad,
-        POINTER_INPUT_SOURCE_UNKNOWN_V2 => engine::SourceClass::Unknown,
-        _ => return None,
-    };
-    let granularity = match value.granularity {
-        POINTER_INPUT_GRANULARITY_LINE_BASED_V2 => engine::ScrollGranularity::LineBased,
-        POINTER_INPUT_GRANULARITY_PIXEL_BASED_V2 => engine::ScrollGranularity::PixelBased,
-        _ => return None,
-    };
-
-    Some(engine::InputEvent::Scroll(engine::ScrollEvent {
-        source: engine::InputSource { source_class },
-        granularity,
-        horizontal_lines: value.horizontal_lines,
-        vertical_lines: value.vertical_lines,
-    }))
+    match value.event_kind {
+        POINTER_INPUT_EVENT_SCROLL_V3 => {
+            if value.button_phase != 0
+                || value.button_number != 0
+                || value.event_number != 0
+                || value.monotonic_time_ns != 0
+            {
+                return None;
+            }
+            let source_class = match value.source_class {
+                POINTER_INPUT_SOURCE_MOUSE_V3 => engine::SourceClass::Mouse,
+                POINTER_INPUT_SOURCE_TRACKPAD_V3 => engine::SourceClass::Trackpad,
+                POINTER_INPUT_SOURCE_UNKNOWN_V3 => engine::SourceClass::Unknown,
+                _ => return None,
+            };
+            let granularity = match value.granularity {
+                POINTER_INPUT_GRANULARITY_LINE_BASED_V3 => engine::ScrollGranularity::LineBased,
+                POINTER_INPUT_GRANULARITY_PIXEL_BASED_V3 => engine::ScrollGranularity::PixelBased,
+                _ => return None,
+            };
+            Some(engine::InputEvent::Scroll(engine::ScrollEvent {
+                source: engine::InputSource { source_class },
+                granularity,
+                horizontal_lines: value.horizontal_lines,
+                vertical_lines: value.vertical_lines,
+            }))
+        }
+        POINTER_INPUT_EVENT_BUTTON_V3 => {
+            if value.source_class != 0
+                || value.granularity != 0
+                || value.horizontal_lines != 0
+                || value.vertical_lines != 0
+            {
+                return None;
+            }
+            let phase = match value.button_phase {
+                POINTER_INPUT_BUTTON_DOWN_V3 => engine::ButtonPhase::Down,
+                POINTER_INPUT_BUTTON_UP_V3 => engine::ButtonPhase::Up,
+                POINTER_INPUT_BUTTON_DRAG_V3 => engine::ButtonPhase::Drag,
+                _ => return None,
+            };
+            Some(engine::InputEvent::Button(engine::ButtonEvent {
+                button_number: value.button_number,
+                phase,
+                modifiers_held: value.modifiers_held == 1,
+                event_number: value.event_number,
+                monotonic_time_ns: value.monotonic_time_ns,
+            }))
+        }
+        _ => None,
+    }
 }
-
+fn cycle_from(value: PointerInputDecisionV3) -> Option<engine::Cycle> {
+    if !valid_layout(
+        value.version,
+        value.size,
+        size_of::<PointerInputDecisionV3>(),
+    ) || value.reserved != [0; 3]
+        || value.cycle_reserved != 0
+        || !valid_bool(value.request_back)
+        || value.decision > POINTER_INPUT_DECISION_SUPPRESS_V3
+        || (value.request_back == 1
+            && (value.decision != POINTER_INPUT_DECISION_SUPPRESS_V3
+                || value.cycle_tag != POINTER_INPUT_CYCLE_OPEN_V3))
+    {
+        return None;
+    }
+    match value.cycle_tag {
+        POINTER_INPUT_CYCLE_CLOSED_V3
+            if value.cycle_button_number == 0
+                && value.cycle_event_number == 0
+                && value.cycle_deadline_monotonic_ns == 0 =>
+        {
+            Some(engine::Cycle::Closed)
+        }
+        POINTER_INPUT_CYCLE_OPEN_V3
+            if engine::Binding::new(value.cycle_button_number, false).is_some()
+                && value.cycle_deadline_monotonic_ns != 0 =>
+        {
+            Some(engine::Cycle::Open {
+                button_number: value.cycle_button_number,
+                event_number: value.cycle_event_number,
+                deadline_monotonic_ns: value.cycle_deadline_monotonic_ns,
+            })
+        }
+        POINTER_INPUT_CYCLE_QUARANTINED_V3
+            if engine::Binding::new(value.cycle_button_number, false).is_some()
+                && value.cycle_deadline_monotonic_ns == 0 =>
+        {
+            Some(engine::Cycle::Quarantined {
+                button_number: value.cycle_button_number,
+                event_number: value.cycle_event_number,
+            })
+        }
+        _ => None,
+    }
+}
+fn output_from(evaluation: engine::Evaluation) -> PointerInputDecisionV3 {
+    let (decision, horizontal_hundredths, vertical_hundredths) = match evaluation.decision {
+        engine::InputDecision::Preserve => (POINTER_INPUT_DECISION_PRESERVE_V3, 0, 0),
+        engine::InputDecision::Replace(scroll) => (
+            POINTER_INPUT_DECISION_REPLACE_V3,
+            scroll.horizontal_hundredths,
+            scroll.vertical_hundredths,
+        ),
+        engine::InputDecision::Suppress => (POINTER_INPUT_DECISION_SUPPRESS_V3, 0, 0),
+    };
+    let (cycle_tag, cycle_button_number, cycle_event_number, cycle_deadline_monotonic_ns) =
+        match evaluation.next_cycle {
+            engine::Cycle::Closed => (POINTER_INPUT_CYCLE_CLOSED_V3, 0, 0, 0),
+            engine::Cycle::Open {
+                button_number,
+                event_number,
+                deadline_monotonic_ns,
+            } => (
+                POINTER_INPUT_CYCLE_OPEN_V3,
+                button_number,
+                event_number,
+                deadline_monotonic_ns,
+            ),
+            engine::Cycle::Quarantined {
+                button_number,
+                event_number,
+            } => (
+                POINTER_INPUT_CYCLE_QUARANTINED_V3,
+                button_number,
+                event_number,
+                0,
+            ),
+        };
+    PointerInputDecisionV3 {
+        decision,
+        request_back: u32::from(evaluation.request_back),
+        cycle_tag,
+        horizontal_hundredths,
+        vertical_hundredths,
+        cycle_button_number,
+        cycle_event_number,
+        cycle_deadline_monotonic_ns,
+        ..preserve_output()
+    }
+}
 unsafe fn engine_from<'a>(handle: *mut c_void) -> &'a engine::Engine {
     // SAFETY: callers guarantee the allocation remains live for this call.
     unsafe { &*handle.cast::<engine::Engine>() }
 }
 
-/// Allocates an opaque engine with system direction.
+/// Allocates an opaque engine with the default configuration.
 ///
 /// # Safety
 /// `out_engine` must point to writable, initially null storage for one owner handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pointer_input_engine_create_v2(
+pub unsafe extern "C" fn pointer_input_engine_create_v3(
     out_engine: *mut *mut c_void,
-) -> PointerInputStatusV2 {
+) -> PointerInputStatusV3 {
     if out_engine.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
     // SAFETY: validated pointer to caller-owned handle storage.
     if !unsafe { out_engine.read() }.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
-
     match catch_unwind(AssertUnwindSafe(|| {
         install_panic_hook()?;
-        let engine = Box::new(engine::Engine::new(engine::ScrollConfiguration::system()));
+        let engine = Box::new(engine::Engine::new(engine::Configuration::system()));
         // SAFETY: validated non-null caller storage.
         unsafe { out_engine.write(Box::into_raw(engine).cast()) };
-        Ok(PointerInputStatusV2::Success)
+        Ok(PointerInputStatusV3::Success)
     })) {
         Ok(Ok(status) | Err(status)) => status,
         Err(payload) => panic_status(payload),
@@ -303,19 +428,18 @@ pub unsafe extern "C" fn pointer_input_engine_create_v2(
 /// # Safety
 /// `configuration` must point to a readable fixed-layout value.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pointer_input_configuration_validate_v2(
-    configuration: *const PointerInputConfigurationV2,
-) -> PointerInputStatusV2 {
+pub unsafe extern "C" fn pointer_input_configuration_validate_v3(
+    configuration: *const PointerInputConfigurationV3,
+) -> PointerInputStatusV3 {
     if configuration.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
-
     match catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: validated non-null pointer to a caller-owned POD value.
         if configuration_from(unsafe { configuration.read() }).is_some() {
-            PointerInputStatusV2::Success
+            PointerInputStatusV3::Success
         } else {
-            PointerInputStatusV2::InvalidArgument
+            PointerInputStatusV3::InvalidArgument
         }
     })) {
         Ok(status) => status,
@@ -326,117 +450,79 @@ pub unsafe extern "C" fn pointer_input_configuration_validate_v2(
 /// Replaces the configuration observed by later evaluations.
 ///
 /// # Safety
-/// `handle` must refer to a live allocation returned by create and `configuration` must point to
-/// its fixed-layout value. A copied non-owning handle may call this concurrently with evaluation
-/// while the owner keeps the allocation live. Stale, fabricated, use-after-destroy, and
-/// concurrently destroyed handles violate the caller contract.
+/// The caller must retain a live created handle and provide readable fixed-layout configuration.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pointer_input_engine_set_configuration_v2(
+pub unsafe extern "C" fn pointer_input_engine_set_configuration_v3(
     handle: *mut c_void,
-    configuration: *const PointerInputConfigurationV2,
-) -> PointerInputStatusV2 {
+    configuration: *const PointerInputConfigurationV3,
+) -> PointerInputStatusV3 {
     if handle.is_null() || configuration.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
-
     match catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: validated non-null pointer to a caller-owned POD value.
         let Some(configuration) = configuration_from(unsafe { configuration.read() }) else {
-            return PointerInputStatusV2::InvalidArgument;
+            return PointerInputStatusV3::InvalidArgument;
         };
         // SAFETY: documented caller ownership contract for `handle`.
         unsafe { engine_from(handle) }.set_configuration(configuration);
-        PointerInputStatusV2::Success
+        PointerInputStatusV3::Success
     })) {
         Ok(status) => status,
         Err(payload) => panic_status(payload),
     }
 }
 
-/// Evaluates one normalized event and writes a fail-open decision.
+/// Evaluates one normalized event and writes a fail-open decision and next cycle.
 ///
 /// # Safety
-/// `handle` must refer to a live allocation returned by create. `event` and `out_decision` must
-/// point to readable and writable fixed-layout values respectively. A copied non-owning handle may
-/// call this concurrently with configuration updates while the owner keeps the allocation live.
-/// Stale, fabricated, use-after-destroy, and concurrently destroyed handles violate the caller
-/// contract.
+/// The caller must retain a live created handle and provide readable event/cycle and writable output.
+/// `cycle` and `out_decision` may point to the same caller-owned POD storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pointer_input_engine_evaluate_v2(
+pub unsafe extern "C" fn pointer_input_engine_evaluate_v3(
     handle: *mut c_void,
-    event: *const PointerInputEventV2,
-    out_decision: *mut PointerInputDecisionV2,
-) -> PointerInputStatusV2 {
+    event: *const PointerInputEventV3,
+    cycle: *const PointerInputDecisionV3,
+    out_decision: *mut PointerInputDecisionV3,
+) -> PointerInputStatusV3 {
     if out_decision.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
-
-    // SAFETY: validated non-null caller output storage; write the fail-open value before input use.
+    // SAFETY: snapshot the caller's readable cycle before output initialization so the two
+    // pointers may designate the same POD storage.
+    let cycle_value = if cycle.is_null() {
+        None
+    } else {
+        Some(unsafe { cycle.read() })
+    };
+    // SAFETY: validated non-null caller output storage; write fail-open data before semantic use.
     unsafe { out_decision.write(preserve_output()) };
     if handle.is_null() || event.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
+        return PointerInputStatusV3::InvalidArgument;
     }
-
+    let Some(cycle_value) = cycle_value else {
+        return PointerInputStatusV3::InvalidArgument;
+    };
     let Some(_scope) = EvaluationScope::enter() else {
-        return PointerInputStatusV2::Panic;
+        return PointerInputStatusV3::Panic;
     };
     match catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: validated non-null pointer to a caller-owned POD value.
+        // SAFETY: all pointers were checked non-null and point to caller-owned POD values.
         let Some(event) = event_from(unsafe { event.read() }) else {
-            return PointerInputStatusV2::InvalidArgument;
+            return PointerInputStatusV3::InvalidArgument;
+        };
+        let Some(cycle) = cycle_from(cycle_value) else {
+            return PointerInputStatusV3::InvalidArgument;
         };
         maybe_inject_evaluation_panic();
         // SAFETY: documented caller ownership contract for `handle`.
-        let evaluation = unsafe { engine_from(handle) }.evaluate(event);
-        match evaluation.status {
-            engine::EvaluationStatus::Success => {
-                let output = match evaluation.decision {
-                    engine::InputDecision::Preserve => preserve_output(),
-                    engine::InputDecision::Replace(scroll) => PointerInputDecisionV2 {
-                        decision: POINTER_INPUT_DECISION_REPLACE_V2,
-                        horizontal_hundredths: scroll.horizontal_hundredths,
-                        vertical_hundredths: scroll.vertical_hundredths,
-                        ..preserve_output()
-                    },
-                };
-                // SAFETY: output was validated and initialized before evaluation.
-                unsafe { out_decision.write(output) };
-                PointerInputStatusV2::Success
-            }
-            engine::EvaluationStatus::EvaluationFailed => PointerInputStatusV2::EvaluationFailed,
+        let evaluation = unsafe { engine_from(handle) }.evaluate_with_cycle(event, cycle);
+        if evaluation.status == engine::EvaluationStatus::EvaluationFailed {
+            return PointerInputStatusV3::EvaluationFailed;
         }
-    })) {
-        Ok(status) => status,
-        Err(payload) => panic_status(payload),
-    }
-}
-
-/// Nulls and releases an opaque engine handle.
-///
-/// # Safety
-/// `in_out_handle` must point to the owner's unique live handle variable, or to a null owner
-/// variable for idempotent cleanup. The owner must keep the allocation live until all non-owning
-/// copied handle uses finish. Concurrent destruction, use-after-destroy, stale, and fabricated
-/// values violate the caller contract.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pointer_input_engine_destroy_v2(
-    in_out_handle: *mut *mut c_void,
-) -> PointerInputStatusV2 {
-    if in_out_handle.is_null() {
-        return PointerInputStatusV2::InvalidArgument;
-    }
-
-    match catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: validated pointer to caller-owned handle storage.
-        let handle = unsafe { in_out_handle.read() };
-        if handle.is_null() {
-            return PointerInputStatusV2::Success;
-        }
-        // SAFETY: null the caller variable before releasing the owned allocation.
-        unsafe { in_out_handle.write(ptr::null_mut()) };
-        // SAFETY: documented caller ownership contract guarantees an allocation from create.
-        drop(unsafe { Box::from_raw(handle.cast::<engine::Engine>()) });
-        PointerInputStatusV2::Success
+        // SAFETY: output was initialized before validation and evaluation.
+        unsafe { out_decision.write(output_from(evaluation)) };
+        PointerInputStatusV3::Success
     })) {
         Ok(status) => status,
         Err(payload) => panic_status(payload),
@@ -457,18 +543,15 @@ static INSTALLATION_GATE: Mutex<
 
 #[cfg(test)]
 struct PanicOnDrop;
-
 #[cfg(test)]
 impl Drop for PanicOnDrop {
     fn drop(&mut self) {
         panic!("test-only panic payload drop");
     }
 }
-
 #[cfg(test)]
 fn maybe_inject_evaluation_panic() {
     use std::sync::atomic::Ordering;
-
     if PANIC_ON_DROP.swap(false, Ordering::Relaxed) {
         std::panic::panic_any(PanicOnDrop);
     }
@@ -476,9 +559,36 @@ fn maybe_inject_evaluation_panic() {
         panic!("test-only evaluation panic");
     }
 }
-
 #[cfg(not(test))]
 fn maybe_inject_evaluation_panic() {}
+
+/// Nulls and releases an opaque engine handle.
+///
+/// # Safety
+/// The caller must own the live handle variable and quiesce all copied-handle uses first.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pointer_input_engine_destroy_v3(
+    in_out_handle: *mut *mut c_void,
+) -> PointerInputStatusV3 {
+    if in_out_handle.is_null() {
+        return PointerInputStatusV3::InvalidArgument;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: validated pointer to caller-owned handle storage.
+        let handle = unsafe { in_out_handle.read() };
+        if handle.is_null() {
+            return PointerInputStatusV3::Success;
+        }
+        // SAFETY: null the caller variable before releasing the owned allocation.
+        unsafe { in_out_handle.write(ptr::null_mut()) };
+        // SAFETY: documented caller ownership contract guarantees allocation from create.
+        drop(unsafe { Box::from_raw(handle.cast::<engine::Engine>()) });
+        PointerInputStatusV3::Success
+    })) {
+        Ok(status) => status,
+        Err(payload) => panic_status(payload),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -493,153 +603,96 @@ mod tests {
         time::Duration,
     };
 
-    fn event() -> PointerInputEventV2 {
-        PointerInputEventV2 {
-            version: POINTER_INPUT_ABI_VERSION_V2,
-            size: size_of::<PointerInputEventV2>() as u32,
-            source_class: POINTER_INPUT_SOURCE_UNKNOWN_V2,
-            granularity: POINTER_INPUT_GRANULARITY_LINE_BASED_V2,
+    fn event() -> PointerInputEventV3 {
+        PointerInputEventV3 {
+            version: POINTER_INPUT_ABI_VERSION_V3,
+            size: size_of::<PointerInputEventV3>() as u32,
+            event_kind: POINTER_INPUT_EVENT_SCROLL_V3,
+            source_class: POINTER_INPUT_SOURCE_UNKNOWN_V3,
+            granularity: POINTER_INPUT_GRANULARITY_LINE_BASED_V3,
+            button_phase: 0,
+            button_number: 0,
+            modifiers_held: 0,
             horizontal_lines: 0,
             vertical_lines: 3,
+            event_number: 0,
+            monotonic_time_ns: 0,
             reserved: [0; 2],
         }
     }
 
     #[test]
-    fn panic_policy_is_fail_open_and_delegates_only_unmarked_panics() {
+    fn panic_policy_contains_evaluation_panics_and_recovers_from_startup_failures() {
         // ponytail: this sole hook-touching unit test retains the wrapper until process exit.
         let _previous_hook = std::panic::take_hook();
         let delegated = Arc::new(AtomicUsize::new(0));
-        let hook_creates = Arc::new(AtomicUsize::new(2));
-        let (hook_create_sender, hook_create_receiver) = mpsc::channel();
         let counter = Arc::clone(&delegated);
-        let creates = Arc::clone(&hook_creates);
+        let (reentrant_sender, reentrant_receiver) = mpsc::channel();
         std::panic::set_hook(Box::new(move |_| {
             counter.fetch_add(1, Ordering::Relaxed);
-            if creates
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
-                    remaining.checked_sub(1)
-                })
-                .is_ok()
-            {
-                let mut owner = ptr::null_mut();
-                let status = unsafe { pointer_input_engine_create_v2(&raw mut owner) };
-                let _ = hook_create_sender.send((status, owner.is_null()));
-            }
+            let mut owner = ptr::null_mut();
+            let status = unsafe { pointer_input_engine_create_v3(&mut owner) };
+            let _ = reentrant_sender.send((status, owner.is_null()));
         }));
-        *INSTALLATION_GATE
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 
-        let event = event();
-        let mut output = preserve_output();
         let mut failed_owner = ptr::null_mut();
         PANIC_HOOK_INSTALL_FAILURE.store(true, Ordering::Relaxed);
-        let failed_startup = unsafe { pointer_input_engine_create_v2(&raw mut failed_owner) };
-        let reentrant_startup = hook_create_receiver.recv_timeout(Duration::from_secs(1));
+        assert_eq!(
+            unsafe { pointer_input_engine_create_v3(&mut failed_owner) },
+            PointerInputStatusV3::Panic
+        );
+        assert!(failed_owner.is_null());
+        assert_eq!(
+            reentrant_receiver.recv_timeout(Duration::from_secs(1)),
+            Ok((PointerInputStatusV3::Busy, true))
+        );
 
-        let (installer_ready_sender, installer_ready_receiver) = mpsc::channel();
-        let (installer_release_sender, installer_release_receiver) = mpsc::channel();
+        let (ready_sender, ready_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
         *INSTALLATION_GATE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            Some((installer_ready_sender, installer_release_receiver));
-        let starter = std::thread::spawn(move || {
+            Some((ready_sender, release_receiver));
+        let installer = std::thread::spawn(|| {
             let mut owner = ptr::null_mut();
-            let status = unsafe { pointer_input_engine_create_v2(&raw mut owner) };
+            let status = unsafe { pointer_input_engine_create_v3(&mut owner) };
             (status, owner as usize)
         });
-        match installer_ready_receiver.recv_timeout(Duration::from_secs(1)) {
-            Ok(()) => {}
-            Err(error) => {
-                let _ = installer_release_sender.send(());
-                hook_creates.store(0, Ordering::Relaxed);
-                panic!("installer did not become ready: {error:?}");
-            }
-        }
-        let mut concurrent_owner = ptr::null_mut();
-        for _ in 0..200 {
+        assert!(ready_receiver.recv_timeout(Duration::from_secs(1)).is_ok());
+        let mut busy_owner = ptr::null_mut();
+        assert_eq!(
+            unsafe { pointer_input_engine_create_v3(&mut busy_owner) },
+            PointerInputStatusV3::Busy
+        );
+        assert!(busy_owner.is_null());
+        assert!(release_sender.send(()).is_ok());
+        let (status, owner) = installer.join().expect("installer must not panic");
+        assert_eq!(status, PointerInputStatusV3::Success);
+        let mut owner = owner as *mut c_void;
+        let input = event();
+        let cycle = preserve_output();
+        let mut output = preserve_output();
+        for trigger in [&PANIC_ON_EVALUATE, &PANIC_ON_DROP] {
+            trigger.store(true, Ordering::Relaxed);
+            let before = delegated.load(Ordering::Relaxed);
             assert_eq!(
-                unsafe { pointer_input_engine_create_v2(&raw mut concurrent_owner) },
-                PointerInputStatusV2::Busy
+                unsafe { pointer_input_engine_evaluate_v3(owner, &input, &cycle, &mut output) },
+                PointerInputStatusV3::Panic
             );
-            assert!(concurrent_owner.is_null());
+            let preserved = preserve_output();
+            assert_eq!(output.version, preserved.version);
+            assert_eq!(output.size, preserved.size);
+            assert_eq!(output.decision, preserved.decision);
+            assert_eq!(output.request_back, preserved.request_back);
+            assert_eq!(output.cycle_tag, preserved.cycle_tag);
+            assert_eq!(delegated.load(Ordering::Relaxed), before);
         }
-
-        let panic_thread = std::thread::spawn(|| {
-            let _ = catch_unwind(|| panic!("unrelated test panic during installation"));
-        });
-        let concurrent_hook_create = match hook_create_receiver.recv_timeout(Duration::from_secs(1))
-        {
-            Ok(result) => result,
-            Err(error) => {
-                let _ = installer_release_sender.send(());
-                hook_creates.store(0, Ordering::Relaxed);
-                panic!("hook-mediated create did not return: {error:?}");
-            }
-        };
-        let _ = installer_release_sender.send(());
-        let starter_result = starter.join();
-        let panic_thread_result = panic_thread.join();
-        *INSTALLATION_GATE
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-
-        let (startup_status, startup_owner) =
-            starter_result.expect("installing creator must not panic");
-        let mut startup_owner = startup_owner as *mut c_void;
-        let delegated_before_unrelated = delegated.load(Ordering::Relaxed);
+        let before = delegated.load(Ordering::Relaxed);
         let _ = catch_unwind(|| panic!("unrelated test panic"));
-        let delegated_after_unrelated = delegated.load(Ordering::Relaxed);
-
-        // ponytail: test-only latch, remove if a real internal fault path gains public-seam coverage.
-        PANIC_ON_EVALUATE.store(true, Ordering::Relaxed);
-        let delegated_before_evaluation = delegated.load(Ordering::Relaxed);
-        let first_panic_status = unsafe {
-            pointer_input_engine_evaluate_v2(startup_owner, &raw const event, &raw mut output)
-        };
-        let first_panic_decision = output.decision;
-        let delegated_after_evaluation = delegated.load(Ordering::Relaxed);
-
-        PANIC_ON_DROP.store(true, Ordering::Relaxed);
-        let delegated_before_payload_drop = delegated.load(Ordering::Relaxed);
-        let drop_panic_status = unsafe {
-            pointer_input_engine_evaluate_v2(startup_owner, &raw const event, &raw mut output)
-        };
-        let drop_panic_decision = output.decision;
-        let delegated_after_payload_drop = delegated.load(Ordering::Relaxed);
-        let startup_destroy_status =
-            unsafe { pointer_input_engine_destroy_v2(&raw mut startup_owner) };
-
-        let mut post_destroy_owner = ptr::null_mut();
-        let post_destroy_status =
-            unsafe { pointer_input_engine_create_v2(&raw mut post_destroy_owner) };
-        let post_destroy_evaluation = unsafe {
-            pointer_input_engine_evaluate_v2(post_destroy_owner, &raw const event, &raw mut output)
-        };
-        let post_destroy_cleanup =
-            unsafe { pointer_input_engine_destroy_v2(&raw mut post_destroy_owner) };
-
-        PANIC_ON_EVALUATE.store(false, Ordering::Relaxed);
-        PANIC_ON_DROP.store(false, Ordering::Relaxed);
-        PANIC_HOOK_INSTALL_FAILURE.store(false, Ordering::Relaxed);
-
-        assert_eq!(failed_startup, PointerInputStatusV2::Panic);
-        assert!(failed_owner.is_null());
-        assert_eq!(reentrant_startup, Ok((PointerInputStatusV2::Busy, true)));
-        assert_eq!(concurrent_hook_create, (PointerInputStatusV2::Busy, true));
-        assert!(panic_thread_result.is_ok());
-        assert_eq!(startup_status, PointerInputStatusV2::Success);
-        assert_eq!(first_panic_status, PointerInputStatusV2::Panic);
-        assert_eq!(first_panic_decision, POINTER_INPUT_DECISION_PRESERVE_V2);
-        assert_eq!(delegated_after_evaluation, delegated_before_evaluation);
-        assert_eq!(drop_panic_status, PointerInputStatusV2::Panic);
-        assert_eq!(drop_panic_decision, POINTER_INPUT_DECISION_PRESERVE_V2);
-        assert_eq!(delegated_after_payload_drop, delegated_before_payload_drop);
-        assert_eq!(delegated_after_unrelated, delegated_before_unrelated + 1);
-        assert_eq!(startup_destroy_status, PointerInputStatusV2::Success);
-        assert_eq!(post_destroy_status, PointerInputStatusV2::Success);
-        assert_eq!(post_destroy_evaluation, PointerInputStatusV2::Success);
-        assert_eq!(post_destroy_cleanup, PointerInputStatusV2::Success);
+        assert_eq!(delegated.load(Ordering::Relaxed), before + 1);
+        assert_eq!(
+            unsafe { pointer_input_engine_destroy_v3(&mut owner) },
+            PointerInputStatusV3::Success
+        );
     }
 }

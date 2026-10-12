@@ -163,9 +163,9 @@ final class InputRuntimeTests: XCTestCase {
         for (text, result, readOnly) in [
             (#"{"schema_version":1,"scroll":{"enabled":false,"line_direction":"reverse"}}"#, "migrated", false),
             (#"{"schema_version":1,"scroll":{"enabled":false,"line_direction":"reverse"}}"#, "migration_failed", true),
-            (#"{"schema_version":3,"future":true}"#, "newer_schema_read_only", false),
+            (#"{"schema_version":4,"future":true}"#, "newer_schema_read_only", false),
             ("broken JSON", "malformed", false),
-            (#"{"schema_version":2,"scroll":{"enabled":false,"line_direction":"reverse","line_amount_percent":137}}"#, "loaded", false)
+            (#"{"schema_version":2,"scroll":{"enabled":false,"line_direction":"reverse","line_amount_percent":137}}"#, "migrated", false)
         ] {
             let configDirectory = directory.appendingPathComponent(result)
             let traceDirectory = directory.appendingPathComponent("trace-" + result)
@@ -177,7 +177,7 @@ final class InputRuntimeTests: XCTestCase {
             setenv("MMF_TRACE_DIR", traceDirectory.path, 1)
             setenv("MMF_TRACE", "1", 1)
             var subject: InputRuntime? = InputRuntime(store: store)
-            XCTAssertEqual(subject?.configuration.amountPercent, result == "loaded" ? 137 : 100)
+            XCTAssertEqual(subject?.configuration.amountPercent, text.contains("line_amount_percent") ? 137 : 100)
             XCTAssertEqual(subject?.hasCommittedConfiguration, result == "loaded" || result == "migrated")
             if result == "migration_failed" {
                 XCTAssertTrue(subject?.migrationFailed == true)
@@ -371,6 +371,34 @@ final class InputRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.configurationAttention, .none)
     }
 
+    func testBindingSurvivesRuntimeTransactionsRejectedWriteAndRetry() throws {
+        let store = ConfigurationStore(directory: directory)
+        let binding = try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))
+        let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137, binding: binding)
+        XCTAssertTrue(store.persist(committed))
+        let runtime = InputRuntime(store: store)
+
+        runtime.setEnabled(true)
+        runtime.setDirection(.preserve)
+        runtime.setAmountPercent(25)
+        let updated = PersistedConfiguration(enabled: true, direction: .preserve, amountPercent: 25, binding: binding)
+        XCTAssertEqual(runtime.configuration, updated)
+        let bytes = try Data(contentsOf: store.url)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        runtime.setAmountPercent(137)
+        XCTAssertEqual(runtime.configuration, updated)
+        XCTAssertEqual(runtime.configurationAttention, .saveFailed)
+        XCTAssertEqual(try Data(contentsOf: store.url), bytes)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        runtime.setAmountPercent(137)
+        let retried = PersistedConfiguration(enabled: true, direction: .preserve, amountPercent: 137, binding: binding)
+        XCTAssertEqual(runtime.configuration, retried)
+        XCTAssertEqual(store.load().0, retried)
+    }
+
     func testFailedAmountWriteKeepsFileAndSnapshotAndAllowsRetry() throws {
         let store = ConfigurationStore(directory: directory)
         let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137)
@@ -394,7 +422,7 @@ final class InputRuntimeTests: XCTestCase {
     func testNewerSchemaAppearingAfterLoadBlocksAllTransactions() throws {
         let store = ConfigurationStore(directory: directory)
         let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137)
-        for version in ["3", "18446744073709551615"] {
+        for version in ["4", "18446744073709551615"] {
             for operation in 0..<3 {
                 try? FileManager.default.removeItem(at: store.url)
                 XCTAssertTrue(store.persist(committed))
@@ -438,10 +466,10 @@ final class InputRuntimeTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: store.url), bytes)
     }
 
-    func testPreciseDecimalVersionAboveTwoRefusesSaveAndResetAfterLoad() throws {
+    func testPreciseDecimalVersionAboveThreeRefusesSaveAndResetAfterLoad() throws {
         let store = ConfigurationStore(directory: directory)
         let committed = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137)
-        for version in ["2.0000000000000000001", "2.0000000000000004", "1e200"] {
+        for version in ["3.0000000000000000001", "3.0000000000000004", "1e200"] {
             try? FileManager.default.removeItem(at: store.url)
             XCTAssertTrue(store.persist(committed))
             let runtime = InputRuntime(store: store)
@@ -462,7 +490,7 @@ final class InputRuntimeTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data("invalid".utf8).write(to: store.url)
         let runtime = InputRuntime(store: store)
-        let bytes = Data(#"{"schema_version":3,"future":true}"#.utf8)
+        let bytes = Data(#"{"schema_version":4,"future":true}"#.utf8)
         try bytes.write(to: store.url)
         XCTAssertFalse(runtime.hasCommittedConfiguration)
         runtime.resetMalformedConfiguration()

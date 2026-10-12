@@ -227,12 +227,12 @@ public final class ScrollRuntime {
     private let coordinatorLock = NSLock()
     private var joined = false
 
-    public convenience init?(direction: ScrollDirection = .preserve, amountPercent: UInt32 = 100) {
-        self.init(direction: direction, amountPercent: amountPercent, trace: TracePipeline(), configRevision: nil, ownsTrace: true)
+    public convenience init?(direction: ScrollDirection = .preserve, amountPercent: UInt32 = 100, binding: ButtonBinding? = nil) {
+        self.init(direction: direction, amountPercent: amountPercent, binding: binding, trace: TracePipeline(), configRevision: nil, ownsTrace: true)
     }
 
-    init?(direction: ScrollDirection, amountPercent: UInt32, trace: TracePipeline?, configRevision: UInt64?, ownsTrace: Bool = false) {
-        guard AXIsProcessTrusted(), let engine = PointerInputEngine(), engine.setDirection(direction, amountPercent: amountPercent) else {
+    init?(direction: ScrollDirection, amountPercent: UInt32, binding: ButtonBinding?, trace: TracePipeline?, configRevision: UInt64?, ownsTrace: Bool = false) {
+        guard AXIsProcessTrusted(), let engine = PointerInputEngine(), engine.setDirection(direction, amountPercent: amountPercent, binding: binding) else {
             if ownsTrace { trace?.close() }
             return nil
         }

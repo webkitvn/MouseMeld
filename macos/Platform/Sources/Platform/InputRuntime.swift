@@ -61,9 +61,9 @@ public final class InputRuntime: ObservableObject {
     public var hasAccessibilityAccess: Bool { AXIsProcessTrusted() }
     public var canEditConfiguration: Bool { canRefresh && !migrationFailed && (configurationAttention == .none || configurationAttention == .saveFailed) && !isSaving }
 
-    public func setEnabled(_ enabled: Bool) { commit(.init(enabled: enabled, direction: configuration.direction, amountPercent: configuration.amountPercent)) }
-    public func setDirection(_ direction: ScrollDirection) { commit(.init(enabled: configuration.enabled, direction: direction, amountPercent: configuration.amountPercent)) }
-    public func setAmountPercent(_ amountPercent: UInt32) { commit(.init(enabled: configuration.enabled, direction: configuration.direction, amountPercent: amountPercent)) }
+    public func setEnabled(_ enabled: Bool) { commit(.init(enabled: enabled, direction: configuration.direction, amountPercent: configuration.amountPercent, binding: configuration.binding)) }
+    public func setDirection(_ direction: ScrollDirection) { commit(.init(enabled: configuration.enabled, direction: direction, amountPercent: configuration.amountPercent, binding: configuration.binding)) }
+    public func setAmountPercent(_ amountPercent: UInt32) { commit(.init(enabled: configuration.enabled, direction: configuration.direction, amountPercent: amountPercent, binding: configuration.binding)) }
 
     public func resetMalformedConfiguration() {
         guard !migrationFailed, configurationAttention == .malformed || configurationAttention == .saveFailed else { return }
@@ -128,7 +128,7 @@ public final class InputRuntime: ObservableObject {
             self.monitor = nil
         }
         publishState()
-        lifecycle.request(enabled: configuration.enabled, trusted: accessibilityTrusted && canRun, direction: configuration.direction, amountPercent: configuration.amountPercent, revision: revision, operationID: operationID, previousRevision: previousRevision)
+        lifecycle.request(enabled: configuration.enabled, trusted: accessibilityTrusted && canRun, direction: configuration.direction, amountPercent: configuration.amountPercent, binding: configuration.binding, revision: revision, operationID: operationID, previousRevision: previousRevision)
     }
 
     private func publishState() {
@@ -142,6 +142,7 @@ private final class LifecycleExecutor: @unchecked Sendable {
         var trusted: Bool
         var direction: ScrollDirection
         var amountPercent: UInt32
+        var binding: ButtonBinding?
         var revision: UInt64
         var operationID: UUID
         var previousRevision: UInt64?
@@ -155,7 +156,7 @@ private final class LifecycleExecutor: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "io.github.webkitvn.mousemeld.lifecycle")
     private let lock = NSLock()
-    private var intent = Intent(enabled: false, trusted: false, direction: .preserve, amountPercent: 100, revision: 0, operationID: UUID(), previousRevision: nil)
+    private var intent = Intent(enabled: false, trusted: false, direction: .preserve, amountPercent: 100, binding: nil, revision: 0, operationID: UUID(), previousRevision: nil)
     private var pending = false
     private var draining = false
     private var shutdownRequested = false
@@ -167,10 +168,10 @@ private final class LifecycleExecutor: @unchecked Sendable {
     private var startFailures = 0
     private var nextStartAllowed = DispatchTime.now()
 
-    func request(enabled: Bool, trusted: Bool, direction: ScrollDirection, amountPercent: UInt32, revision: UInt64, operationID: UUID, previousRevision: UInt64?) {
+    func request(enabled: Bool, trusted: Bool, direction: ScrollDirection, amountPercent: UInt32, binding: ButtonBinding?, revision: UInt64, operationID: UUID, previousRevision: UInt64?) {
         lock.lock()
         guard !shutdownRequested else { lock.unlock(); return }
-        intent = Intent(enabled: enabled, trusted: trusted, direction: direction, amountPercent: amountPercent, revision: revision, operationID: operationID, previousRevision: previousRevision)
+        intent = Intent(enabled: enabled, trusted: trusted, direction: direction, amountPercent: amountPercent, binding: binding, revision: revision, operationID: operationID, previousRevision: previousRevision)
         pending = true
         guard !draining else { lock.unlock(); return }
         draining = true
@@ -254,7 +255,7 @@ private final class LifecycleExecutor: @unchecked Sendable {
             publish(.unavailable)
             return
         }
-        guard let candidate = ScrollRuntime(direction: desired.direction, amountPercent: desired.amountPercent, trace: trace, configRevision: desired.revision), candidate.start() else {
+        guard let candidate = ScrollRuntime(direction: desired.direction, amountPercent: desired.amountPercent, binding: desired.binding, trace: trace, configRevision: desired.revision), candidate.start() else {
             registerStartFailure()
             activation(desired, result: "unavailable")
             publish(.unavailable)
@@ -267,7 +268,7 @@ private final class LifecycleExecutor: @unchecked Sendable {
             publish(.unavailable)
             return
         }
-        guard latest.revision == desired.revision, latest.direction == desired.direction, latest.amountPercent == desired.amountPercent else {
+        guard latest.revision == desired.revision, latest.direction == desired.direction, latest.amountPercent == desired.amountPercent, latest.binding == desired.binding else {
             candidate.stop()
             return reconcile()
         }
@@ -289,7 +290,7 @@ private final class LifecycleExecutor: @unchecked Sendable {
         guard lastActivation != desired || lastActivationResult != result else { return }
         lastActivation = desired
         lastActivationResult = result
-        trace?.configuration("config.activation", operationID: desired.operationID, oldRevision: desired.previousRevision, newRevision: result == "active" ? desired.revision : nil, configuration: .init(enabled: desired.enabled, direction: desired.direction, amountPercent: desired.amountPercent), result: result)
+        trace?.configuration("config.activation", operationID: desired.operationID, oldRevision: desired.previousRevision, newRevision: result == "active" ? desired.revision : nil, configuration: .init(enabled: desired.enabled, direction: desired.direction, amountPercent: desired.amountPercent, binding: desired.binding), result: result)
     }
 
     private func retire() {
