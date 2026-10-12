@@ -42,6 +42,8 @@ Use Oracle only for material second-model review, architecture/design uncertaint
 
 Before any consultation, read and follow the installed `oracle` skill.
 
+Use `--engine browser` explicitly in the [dedicated ChatGPT Project](https://chatgpt.com/g/g-p-6a8825fba8a88191b61159104f8bf9f8-mac-mouse-flow/project). Verify that the consultation conversation belongs to this Project.
+
 ## Start work
 
 Use `gh` as the default project interface.
