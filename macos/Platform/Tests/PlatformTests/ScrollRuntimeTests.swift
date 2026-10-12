@@ -5,7 +5,7 @@ import CoreGraphics
 import XCTest
 
 final class ScrollRuntimeTests: XCTestCase {
-    func testLoadedV2AmountReachesRustAndNativeAdapter() throws {
+    func testLoadedSchemaAmountReachesRustAndNativeAdapter() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = ConfigurationStore(directory: directory)

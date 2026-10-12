@@ -25,7 +25,7 @@ final class ConfigurationStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.url.path))
     }
 
-    func testV2ConfigurationPersistsAcrossRestart() throws {
+    func testV3ConfigurationPersistsAcrossRestart() throws {
         let store = ConfigurationStore(directory: directory)
         for amount: UInt32 in [25, 100, 137, 400] {
             let expected = PersistedConfiguration(enabled: true, direction: .reverse, amountPercent: amount)
@@ -34,7 +34,7 @@ final class ConfigurationStoreTests: XCTestCase {
             XCTAssertEqual(loaded.0, expected)
             XCTAssertEqual(loaded.1, .none)
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.url)) as? [String: Any])
-            XCTAssertEqual(object["schema_version"] as? Int, 2)
+            XCTAssertEqual(object["schema_version"] as? Int, 3)
             XCTAssertEqual(Set(object.keys), ["schema_version", "scroll"])
             let scroll = try XCTUnwrap(object["scroll"] as? [String: Any])
             XCTAssertEqual(Set(scroll.keys), ["enabled", "line_direction", "line_amount_percent"])
@@ -54,7 +54,7 @@ final class ConfigurationStoreTests: XCTestCase {
                 XCTAssertEqual(loaded.1, .none)
                 let migrated = try Data(contentsOf: store.url)
                 let object = try XCTUnwrap(JSONSerialization.jsonObject(with: migrated) as? [String: Any])
-                XCTAssertEqual(object["schema_version"] as? Int, 2)
+                XCTAssertEqual(object["schema_version"] as? Int, 3)
                 XCTAssertEqual((object["scroll"] as? [String: Any])?["line_amount_percent"] as? Int, 100)
                 XCTAssertEqual(ConfigurationStore(directory: directory).load().0, loaded.0)
                 XCTAssertEqual(try Data(contentsOf: store.url), migrated)
@@ -134,7 +134,7 @@ final class ConfigurationStoreTests: XCTestCase {
         }
     }
 
-    func testInvalidV2AndUnsupportedOlderConfigurationNeverRewrite() throws {
+    func testInvalidHistoricalAndUnsupportedOlderConfigurationNeverRewrite() throws {
         let store = ConfigurationStore(directory: directory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var documents = ["24", "401", "-1", "4294967296", "18446744073709551615", "137.5", "137.0", "true", "false", "\"137\"", "null", "{}", "[]"].map {
@@ -166,7 +166,7 @@ final class ConfigurationStoreTests: XCTestCase {
     func testNewerConfigurationIsReadOnlyWithoutRewrite() throws {
         let store = ConfigurationStore(directory: directory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for version in ["3", "18446744073709551615"] {
+        for version in ["4", "18446744073709551615"] {
             let data = Data("{\"schema_version\":\(version),\"scroll\":\"unknown-future-data\"}".utf8)
             try data.write(to: store.url)
             let loaded = store.load()
@@ -200,7 +200,7 @@ final class ConfigurationStoreTests: XCTestCase {
     func testSharedWriterPreservesNewerSchemasAndRejectsBooleanVersionClassification() throws {
         let store = ConfigurationStore(directory: directory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for version in ["3", "18446744073709551615"] {
+        for version in ["4", "18446744073709551615"] {
             let bytes = Data("{\"schema_version\":\(version),\"future\":true}".utf8)
             try bytes.write(to: store.url)
             XCTAssertFalse(store.persist(.init(enabled: true, direction: .reverse, amountPercent: 137)))
@@ -220,7 +220,7 @@ final class ConfigurationStoreTests: XCTestCase {
     func testOversizedOrUncertainNumericSchemaCannotBeOverwritten() throws {
         let store = ConfigurationStore(directory: directory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for version in ["18446744073709551616", "9999999999999999999999999999999999999999", "2.0000000000000000001", "2.0000000000000004", "1e200", "3.5", "3e2"] {
+        for version in ["18446744073709551616", "9999999999999999999999999999999999999999", "3.0000000000000000001", "3.0000000000000004", "1e200", "4.5", "4e2"] {
             let bytes = Data("{\"schema_version\":\(version),\"future\":true}".utf8)
             try bytes.write(to: store.url)
             XCTAssertEqual(store.load().1, .newerSchema)
@@ -252,6 +252,28 @@ final class ConfigurationStoreTests: XCTestCase {
         XCTAssertEqual(runtime.state, .off)
         XCTAssertEqual(store.load().0, .default)
         XCTAssertNotEqual(try Data(contentsOf: store.url), bytes)
+    }
+
+    func testV3BindingPersistsAndRejectsInvalidDocumentsWithoutRewrite() throws {
+        let store = ConfigurationStore(directory: directory)
+        let binding = try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))
+        let configuration = PersistedConfiguration(enabled: false, direction: .reverse, amountPercent: 137, binding: binding)
+        XCTAssertTrue(store.persist(configuration))
+        XCTAssertEqual(ConfigurationStore(directory: directory).load().0, configuration)
+        let bytes = try Data(contentsOf: store.url)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        XCTAssertEqual(object["schema_version"] as? Int, 3)
+        XCTAssertEqual(Set(try XCTUnwrap(object["button_binding"] as? [String: Any]).keys), ["enabled", "button_number"])
+        for invalid in [
+            #"{"schema_version":3,"scroll":{"enabled":false,"line_direction":"reverse","line_amount_percent":137},"button_binding":null}"#,
+            #"{"schema_version":3,"scroll":{"enabled":false,"line_direction":"reverse","line_amount_percent":137},"button_binding":{"enabled":true,"button_number":2}}"#,
+            #"{"schema_version":3,"scroll":{"enabled":false,"line_direction":"reverse","line_amount_percent":137},"button_binding":{"enabled":true,"button_number":3,"extra":true}}"#,
+        ] {
+            let invalidBytes = Data(invalid.utf8)
+            try invalidBytes.write(to: store.url)
+            XCTAssertEqual(store.load().1, .malformed)
+            XCTAssertEqual(try Data(contentsOf: store.url), invalidBytes)
+        }
     }
 
     func testBridgeValidationAcceptsBothDirections() {
