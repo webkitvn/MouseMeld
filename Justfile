@@ -27,6 +27,8 @@ test:
     target/abi_contract
     cc -std=c11 -Wall -Wextra -Werror -Imacos/Bridge/CPointerInput macos/Bridge/CPointerInput/test_trace_ring.c -o target/trace_ring_contract
     target/trace_ring_contract
+    cc -std=c11 -Wall -Wextra -Werror -pthread -Imacos/Bridge/CPointerInput macos/Bridge/CPointerInput/test_observation_slot.c -o target/observation_slot_contract
+    target/observation_slot_contract
     MMF_FFI_PROFILE=debug swift test --package-path macos
 
 ci: check test build

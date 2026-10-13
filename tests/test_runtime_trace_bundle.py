@@ -231,6 +231,71 @@ class RuntimeTraceBundleTests(unittest.TestCase):
                     self.assertTrue(any(r["name"] == "config.rollback" and r["operation_id"] == rejected["operation_id"] and r["new_config_revision"] == 1 for r in records))
                 self.assertEqual(inputs[-1]["config_revision"], 1)
 
+    def test_chrome_observation_boundary_reservation_and_rejection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            library = root / "chrome-observation.dylib"
+            subprocess.run([
+                "clang", "-Wall", "-Wextra", "-Werror", "-dynamiclib",
+                str(ROOT / "tests/fixtures/chrome_observation_boundary.m"),
+                "-framework", "AppKit", "-framework", "ApplicationServices", "-lobjc",
+                "-o", str(library),
+            ], check=True)
+            subprocess.run(["swift", "build", "--build-tests", "--package-path", "macos"], cwd=ROOT, env={**os.environ, "MMF_FFI_PROFILE": "debug"}, check=True, capture_output=True)
+            binary_path = subprocess.check_output(["swift", "build", "--show-bin-path", "--package-path", "macos"], cwd=ROOT, text=True).strip()
+            binary = pathlib.Path(binary_path) / "MouseMeldPackageTests.xctest/Contents/MacOS/MouseMeldPackageTests"
+            test_root = str(binary.parents[2])
+            executable = str(pathlib.Path(subprocess.check_output(["xcode-select", "-p"], text=True).strip()) / "usr/bin/xctest")
+            command = [executable, "-XCTest", "PlatformTests.ScrollRuntimeTests/testSystemBoundaryObservationReservationAndRetirement", test_root]
+            cases = [
+                ("direct-window", {}),
+                ("attribute-window", {"MMF_TEST_OBSERVATION_ATTRIBUTE_WINDOW": "1"}),
+                ("changed-point", {"MMF_TEST_OBSERVATION_POINT": "changed"}),
+                ("short-witness", {"MMF_TEST_OBSERVATION_PROC_SHORT": "1"}),
+                ("dead-witness", {"MMF_TEST_OBSERVATION_PROC_DEAD": "1"}),
+                ("exiting-witness", {"MMF_TEST_OBSERVATION_PROC_EXITING": "1"}),
+                ("reused-witness", {"MMF_TEST_OBSERVATION_PROC_REUSED": "1"}),
+                ("hit-pid-mismatch", {"MMF_TEST_OBSERVATION_HIT_PID_MISMATCH": "1"}),
+            ]
+            for name, extra in cases:
+                with self.subTest(case=name):
+                    result = subprocess.run(command, env={**os.environ, "DYLD_INSERT_LIBRARIES": str(library), "MMF_TEST_CHROME_OBSERVATION": "1", **extra}, cwd=ROOT, text=True, capture_output=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, f"case={name}\n{result.stdout}{result.stderr}")
+                    self.assertIn("Executed 1 test", result.stdout + result.stderr)
+            fixture_cases = [
+                ("testCallbackHarnessReservationSeamPreservesWhenNoObservationIsPrepared", False),
+                ("testCallbackHarnessReservationThenCloseWithoutAbort", False),
+                ("testRetirementWaitsForHeldPreparationBeforeWorkerDrain", False),
+                ("testSlowPreparationRejectsAfterCompletion", False),
+                ("testSlowPreparationRejectsAfterCompletion", True),
+            ]
+            for name, slow in fixture_cases:
+                case = name + ("-slow" if slow else "-fast")
+                fixture = root / case
+                fixture.mkdir()
+                env = {
+                    **os.environ,
+                    "DYLD_INSERT_LIBRARIES": str(library),
+                    "MMF_TEST_CHROME_OBSERVATION": "1",
+                    "MMF_TEST_OBSERVATION_ROOT": str(fixture),
+                    "MMF_TEST_OBSERVATION_WARM": str(fixture / "warm"),
+                    "MMF_TEST_OBSERVATION_ARM": str(fixture / "arm"),
+                    "MMF_TEST_OBSERVATION_QUERY_STARTED": str(fixture / "query-started"),
+                    "MMF_TEST_OBSERVATION_QUERY_RELEASE": str(fixture / "query-release"),
+                    "MMF_TEST_OBSERVATION_QUERY_FINISHED": str(fixture / "query-finished"),
+                    "MMF_TEST_OBSERVATION_SAMPLE_LOWER_BOUND": str(fixture / "sample-lower-bound"),
+                    "MMF_TEST_OBSERVATION_REFRESH_COMPLETED": str(fixture / "refresh-completed"),
+                    "MMF_TEST_OBSERVATION_NEXT_REFRESH_RELEASE": str(fixture / "next-refresh-release"),
+                    "MMF_TEST_OBSERVATION_TAP_INVALIDATED": str(fixture / "tap-invalidated"),
+                }
+                if name == "testCallbackHarnessReservationSeamPreservesWhenNoObservationIsPrepared":
+                    env["MMF_TEST_OBSERVATION_HOLD_FIRST"] = "1"
+                if slow:
+                    env["MMF_TEST_OBSERVATION_SLOW"] = "1"
+                result = subprocess.run([executable, "-XCTest", f"PlatformTests.ScrollRuntimeTests/{name}", test_root], env=env, cwd=ROOT, text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, f"case={case}\n{result.stdout}{result.stderr}")
+                self.assertIn("Executed 1 test", result.stdout + result.stderr)
+
     def test_stalled_trace_sink_drops_diagnostics_without_blocking_input(self):
         self.assert_stalled_trace_sink(False)
 
