@@ -1,5 +1,6 @@
 module CPointerInput [system] {
     header "../../../rust/ffi/include/pointer_input_ffi.h"
     header "mmf_trace_ring.h"
+    header "mmf_observation_slot.h"
     export *
 }

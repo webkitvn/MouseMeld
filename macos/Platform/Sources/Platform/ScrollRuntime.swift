@@ -51,6 +51,7 @@ final class TapState: @unchecked Sendable {
     let trace: TracePipeline?
     let configRevision: UInt64?
     private let ownsTrace: Bool
+    private let observation: ChromeObservationWorker?
     let ready = DispatchSemaphore(value: 0)
     let stopped = DispatchSemaphore(value: 0)
     private var lifecycle = Lifecycle.idle
@@ -66,6 +67,11 @@ final class TapState: @unchecked Sendable {
         self.trace = trace
         self.configRevision = configRevision
         self.ownsTrace = ownsTrace
+        if let configRevision, engine.configuration.binding?.enabled == true {
+            observation = ChromeObservationWorker(epoch: configRevision)
+        } else {
+            observation = nil
+        }
     }
 
     func begin() -> Bool {
@@ -101,6 +107,7 @@ final class TapState: @unchecked Sendable {
             return
         }
         CFRunLoopAddSource(runLoop, source, .commonModes)
+        observation?.start()
         CGEvent.tapEnable(tap: tap, enable: true)
         lock.lock()
         self.tap = tap
@@ -147,6 +154,14 @@ final class TapState: @unchecked Sendable {
         return CGEvent.tapIsEnabled(tap: tap) ? .active : .unavailable
     }
 
+    func reservePreparedObservation(point: CGPoint, epoch: UInt64, now: UInt64) -> Bool {
+        observation?.reserve(epoch: epoch, point: point, now: now) ?? false
+    }
+
+    func abortPreparedObservation() {
+        observation?.abortReservation()
+    }
+
     func completedTimeoutCount() -> Int {
         lock.lock()
         defer { lock.unlock() }
@@ -155,6 +170,7 @@ final class TapState: @unchecked Sendable {
     }
 
     func finishOnOwnerRunLoop() {
+        observation?.disableAdmissions(nextEpoch: (configRevision ?? 0) &+ 1)
         // Runs on the tap-owner thread. Publish the cleared handles under the lock
         // before tearing the tap down, so no cross-thread `runtimeStatus()` reader can
         // observe (or hold) a port that is being invalidated.
@@ -168,6 +184,9 @@ final class TapState: @unchecked Sendable {
         if let tap { CFMachPortInvalidate(tap) }
         runLoop = nil
         lock.unlock()
+        // The tap is disabled and its run-loop source removed before the worker drains.
+        observation?.abortReservation()
+        observation?.stop(nextEpoch: (configRevision ?? 0) &+ 1)
     }
 
     func disabledByTimeout() {
@@ -199,16 +218,57 @@ final class TapState: @unchecked Sendable {
 
 @_spi(Benchmark) public final class CallbackHarness {
     private let state: TapState
+    private let coordinatorLock = NSLock()
+    private var thread: Thread?
+    private var joined = false
 
-    @_spi(Benchmark) public init(engine: PointerInputEngine, trace: Bool = true) { state = TapState(engine: engine, trace: trace ? TracePipeline() : nil) }
+    @_spi(Benchmark) public init(engine: PointerInputEngine, trace: Bool = true, configRevision: UInt64? = nil) { state = TapState(engine: engine, trace: trace ? TracePipeline() : nil, configRevision: configRevision) }
+
+    @_spi(Benchmark) public func start() -> Bool {
+        coordinatorLock.lock()
+        defer { coordinatorLock.unlock() }
+        guard !joined, state.begin() else { return false }
+        let state = self.state
+        let thread = Thread { state.run() }
+        self.thread = thread
+        thread.start()
+        guard state.ready.wait(timeout: .now() + 1) == .success else {
+            closeLocked()
+            return false
+        }
+        return state.awaitReady()
+    }
 
     @_spi(Benchmark) public func invoke(_ type: CGEventType, event: CGEvent) {
         _ = ScrollRuntime.callback(OpaquePointer(bitPattern: 0x1)!, type, event, Unmanaged.passUnretained(state).toOpaque())
     }
 
-    deinit { state.complete() }
+    deinit { close() }
 
-    @_spi(Benchmark) public func close() { state.complete() }
+    @_spi(Benchmark) public func close() {
+        coordinatorLock.lock()
+        defer { coordinatorLock.unlock() }
+        closeLocked()
+    }
+
+    private func closeLocked() {
+        guard !joined else { return }
+        let request = state.cancelAndRunLoop()
+        guard request.join else {
+            state.complete()
+            joined = true
+            return
+        }
+        if let runLoop = request.runLoop {
+            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue as NSString) {
+                self.state.finishOnOwnerRunLoop()
+                CFRunLoopStop(runLoop)
+            }
+            CFRunLoopWakeUp(runLoop)
+        }
+        _ = state.stopped.wait(timeout: .distantFuture)
+        joined = true
+    }
 
     @_spi(Benchmark) public func cleanTraceShutdown() -> Bool { state.trace?.cleanShutdown() ?? false }
 
@@ -218,6 +278,20 @@ final class TapState: @unchecked Sendable {
 
     @_spi(Benchmark) public func setConfiguration(_ direction: ScrollDirection, amountPercent: UInt32) -> Bool {
         state.engine.setDirection(direction, amountPercent: amountPercent)
+    }
+
+    @_spi(Benchmark) public func reservePreparedObservation(point: CGPoint, epoch: UInt64, now: UInt64) -> Bool {
+        coordinatorLock.lock()
+        defer { coordinatorLock.unlock() }
+        guard !joined else { return false }
+        return state.reservePreparedObservation(point: point, epoch: epoch, now: now)
+    }
+
+    @_spi(Benchmark) public func abortPreparedObservation() {
+        coordinatorLock.lock()
+        defer { coordinatorLock.unlock() }
+        guard !joined else { return }
+        state.abortPreparedObservation()
     }
 }
 

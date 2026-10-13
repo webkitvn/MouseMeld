@@ -173,6 +173,199 @@ final class ScrollRuntimeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("exported/manifest.json").path))
     }
 
+    func testCallbackHarnessReservationSeamPreservesWhenNoObservationIsPrepared() throws {
+        guard ProcessInfo.processInfo.environment["MMF_TEST_CHROME_OBSERVATION"] != nil,
+              let root = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_ROOT"] else {
+            throw XCTSkip("Run through tests/test_runtime_trace_bundle.py Chrome observation boundary fixture")
+        }
+        let fixture = URL(fileURLWithPath: root)
+        let arm = fixture.appendingPathComponent("arm")
+        let started = fixture.appendingPathComponent("query-started")
+        let release = fixture.appendingPathComponent("query-release")
+        FileManager.default.createFile(atPath: arm.path, contents: nil)
+        let engine = try XCTUnwrap(PointerInputEngine())
+        XCTAssertTrue(engine.setDirection(.preserve, binding: try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))))
+        let callback = CallbackHarness(engine: engine, trace: false, configRevision: 7)
+        XCTAssertTrue(callback.start())
+        defer { callback.close() }
+        let deadline = Date().addingTimeInterval(2)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        XCTAssertFalse(callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds))
+        FileManager.default.createFile(atPath: release.path, contents: nil)
+    }
+
+    func testSystemBoundaryObservationReservationAndRetirement() throws {
+        guard ProcessInfo.processInfo.environment["MMF_TEST_CHROME_OBSERVATION"] != nil else {
+            throw XCTSkip("Run through tests/test_runtime_trace_bundle.py Chrome observation boundary fixture")
+        }
+        let engine = try XCTUnwrap(PointerInputEngine())
+        let binding = try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))
+        XCTAssertTrue(engine.setDirection(.preserve, binding: binding))
+        let callback = CallbackHarness(engine: engine, trace: false, configRevision: 7)
+        XCTAssertTrue(callback.start())
+        let holdStarted = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_QUERY_STARTED"]
+        let holdRelease = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_QUERY_RELEASE"]
+        if let holdStarted, let holdRelease {
+            let deadline = Date().addingTimeInterval(2)
+            while !FileManager.default.fileExists(atPath: holdStarted), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: holdStarted))
+            while !FileManager.default.fileExists(atPath: holdRelease), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: holdRelease))
+            let slow = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_SLOW"] != nil
+            if slow, let finished = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_QUERY_FINISHED"] {
+                while !FileManager.default.fileExists(atPath: finished), Date() < deadline {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+                }
+                XCTAssertTrue(FileManager.default.fileExists(atPath: finished))
+            }
+            XCTAssertFalse(callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds))
+            callback.close()
+            return
+        }
+        defer { callback.close() }
+
+        let deadline = Date().addingTimeInterval(2)
+        var reserved = false
+        while !reserved, Date() < deadline {
+            reserved = callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds)
+            if !reserved { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        let rejectedByBoundary = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_POINT"] != nil
+            || ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_PROC_SHORT"] != nil
+            || ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_PROC_DEAD"] != nil
+            || ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_PROC_EXITING"] != nil
+            || ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_PROC_REUSED"] != nil
+            || ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_HIT_PID_MISMATCH"] != nil
+        if rejectedByBoundary {
+            XCTAssertFalse(reserved)
+            return
+        }
+        XCTAssertTrue(reserved)
+        callback.abortPreparedObservation()
+    }
+
+    func testRetirementWaitsForHeldPreparationBeforeWorkerDrain() throws {
+        guard ProcessInfo.processInfo.environment["MMF_TEST_CHROME_OBSERVATION"] != nil,
+              let root = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_ROOT"] else {
+            throw XCTSkip("Run through tests/test_runtime_trace_bundle.py Chrome observation boundary fixture")
+        }
+        let fixture = URL(fileURLWithPath: root)
+        let arm = fixture.appendingPathComponent("arm")
+        let started = fixture.appendingPathComponent("query-started")
+        let release = fixture.appendingPathComponent("query-release")
+        let invalidated = fixture.appendingPathComponent("tap-invalidated")
+        FileManager.default.createFile(atPath: arm.path, contents: nil)
+        let engine = try XCTUnwrap(PointerInputEngine())
+        XCTAssertTrue(engine.setDirection(.preserve, binding: try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))))
+        let callback = CallbackHarness(engine: engine, trace: false, configRevision: 7)
+        XCTAssertTrue(callback.start())
+        let deadline = Date().addingTimeInterval(2)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        let closed = DispatchSemaphore(value: 0)
+        Thread { callback.close(); closed.signal() }.start()
+        while !FileManager.default.fileExists(atPath: invalidated.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: invalidated.path))
+        XCTAssertEqual(closed.wait(timeout: .now() + 0.15), .timedOut)
+        FileManager.default.createFile(atPath: release.path, contents: nil)
+        XCTAssertEqual(closed.wait(timeout: .now() + 2), .success)
+        XCTAssertFalse(callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds))
+    }
+
+    func testSlowPreparationRejectsAfterCompletion() throws {
+        guard ProcessInfo.processInfo.environment["MMF_TEST_CHROME_OBSERVATION"] != nil,
+              let root = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_ROOT"] else {
+            throw XCTSkip("Run through tests/test_runtime_trace_bundle.py Chrome observation boundary fixture")
+        }
+        let fixture = URL(fileURLWithPath: root)
+        let warm = fixture.appendingPathComponent("warm")
+        let arm = fixture.appendingPathComponent("arm")
+        let started = fixture.appendingPathComponent("query-started")
+        let release = fixture.appendingPathComponent("query-release")
+        let finished = fixture.appendingPathComponent("query-finished")
+        let sampleLowerBound = fixture.appendingPathComponent("sample-lower-bound")
+        let completed = fixture.appendingPathComponent("refresh-completed")
+        let nextRefreshRelease = fixture.appendingPathComponent("next-refresh-release")
+        let engine = try XCTUnwrap(PointerInputEngine())
+        XCTAssertTrue(engine.setDirection(.preserve, binding: try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))))
+        let callback = CallbackHarness(engine: engine, trace: false, configRevision: 7)
+        XCTAssertTrue(callback.start())
+        defer { callback.close() }
+        let deadline = Date().addingTimeInterval(2)
+        while !FileManager.default.fileExists(atPath: warm.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: warm.path))
+        var reserved = false
+        while !reserved, Date() < deadline {
+            reserved = callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds)
+            if !reserved { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        XCTAssertTrue(reserved)
+        callback.abortPreparedObservation()
+        reserved = false
+        FileManager.default.createFile(atPath: arm.path, contents: nil)
+        while !FileManager.default.fileExists(atPath: started.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        let sampleText = try String(contentsOf: sampleLowerBound, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let sampleLowerBoundNs = try XCTUnwrap(UInt64(sampleText))
+        let probeNow = DispatchTime.now().uptimeNanoseconds
+        XCTAssertGreaterThanOrEqual(probeNow, sampleLowerBoundNs)
+        XCTAssertLessThanOrEqual(probeNow - sampleLowerBoundNs, 100_000_000)
+        FileManager.default.createFile(atPath: release.path, contents: nil)
+        while !FileManager.default.fileExists(atPath: finished.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finished.path))
+        while !FileManager.default.fileExists(atPath: completed.path), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: completed.path))
+        let slow = ProcessInfo.processInfo.environment["MMF_TEST_OBSERVATION_SLOW"] != nil
+        let probeReserved = callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: probeNow)
+        XCTAssertEqual(probeReserved, !slow)
+        if probeReserved { callback.abortPreparedObservation() }
+        FileManager.default.createFile(atPath: nextRefreshRelease.path, contents: nil)
+        while !reserved, Date() < deadline {
+            reserved = callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds)
+            if !reserved { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        XCTAssertTrue(reserved)
+        callback.abortPreparedObservation()
+    }
+
+    func testCallbackHarnessReservationThenCloseWithoutAbort() throws {
+        guard ProcessInfo.processInfo.environment["MMF_TEST_CHROME_OBSERVATION"] != nil else {
+            throw XCTSkip("Run through tests/test_runtime_trace_bundle.py Chrome observation boundary fixture")
+        }
+        let engine = try XCTUnwrap(PointerInputEngine())
+        XCTAssertTrue(engine.setDirection(.preserve, binding: try XCTUnwrap(ButtonBinding(enabled: true, buttonNumber: 3))))
+        let callback = CallbackHarness(engine: engine, trace: false, configRevision: 7)
+        XCTAssertTrue(callback.start())
+        let deadline = Date().addingTimeInterval(2)
+        var reserved = false
+        while !reserved, Date() < deadline {
+            reserved = callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds)
+            if !reserved { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        XCTAssertTrue(reserved)
+        callback.close()
+        XCTAssertFalse(callback.reservePreparedObservation(point: CGPoint(x: 100, y: 200), epoch: 7, now: DispatchTime.now().uptimeNanoseconds))
+    }
+
     func testUnavailableTraceFailsEvidenceButPreservesInput() throws {
         let oldTrace = getenv("MMF_TRACE").map { String(cString: $0) }
         let oldDirectory = getenv("MMF_TRACE_DIR").map { String(cString: $0) }
